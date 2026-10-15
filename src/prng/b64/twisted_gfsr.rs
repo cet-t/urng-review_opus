@@ -1,7 +1,6 @@
 use wrapn::{wrap, wusize};
 
 use crate::{
-    _internal::{i2f_bits, u2f_01},
     SplitMix64,
     rng::Rng,
 };
@@ -64,11 +63,11 @@ impl TwistedGFSR {
     }
 }
 
-impl Rng for TwistedGFSR {
-    type Word = u64;
-
+impl TwistedGFSR {
+    /// One raw 32-bit TT800 output (Matsumoto & Kurita 1996, with the
+    /// `y ^= y >> 16` tempering of the 1996 version).
     #[inline]
-    fn nextu(&mut self) -> Self::Word {
+    pub(crate) fn next_u32_raw(&mut self) -> u32 {
         if self.index >= N_GFSR {
             self.twist();
         }
@@ -77,31 +76,87 @@ impl Rng for TwistedGFSR {
         y ^= (y << 15) & 0xdb8b_0000;
         y ^= y >> 16;
         self.index += 1;
-        u64::from(y)
+        y
     }
+}
 
-    #[inline(always)]
-    fn nextf(&mut self) -> f64 {
-        // TwistedGFSR emits 32-bit-range words in a u64; use the 32-bit
-        // bit-trick (matching the scalar `u2f_01`) widened to f64.
-        u2f_01!(f32, 32, self.nextu() as u32) as f64
-    }
+impl Rng for TwistedGFSR {
+    type Word = u64;
 
-    #[inline(always)]
-    fn randi(&mut self, min: i64, max: i64) -> i64 {
-        let range = (max as i128 - min as i128 + 1) as u128;
-        ((self.nextu() as u128 * range) >> 32) as i64 + min
-    }
-
-    #[inline(always)]
-    fn randf(&mut self, min: f64, max: f64) -> f64 {
-        min + self.nextf() * (max - min)
+    /// Two consecutive TT800 outputs, first one in the high half.
+    ///
+    /// Previously only one 32-bit output was returned in a `u64`, which broke the
+    /// `Rng` contract ("uniform over `[0, 2^64)`"): `choice` always returned
+    /// index 0 and `shuffle` gave the same permutation for every seed.
+    #[inline]
+    fn nextu(&mut self) -> Self::Word {
+        let hi = self.next_u32_raw() as u64;
+        let lo = self.next_u32_raw() as u64;
+        (hi << 32) | lo
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Choice, Shuffle};
 
     crate::safe_test! { TwistedGFSR }
+
+    /// TT800 step function checked against an independent transcription of
+    /// Matsumoto & Kurita's `tt800.c` (1996) on an injected state.
+    #[test]
+    fn tt800_matches_reference() {
+        fn reference(x: &mut [u32; 25], k: &mut usize) -> u32 {
+            const MAG01: [u32; 2] = [0x0, 0x8ebfd028];
+            if *k == 25 {
+                for kk in 0..25 {
+                    let src = if kk < 18 { kk + 7 } else { kk + 7 - 25 };
+                    x[kk] = x[src] ^ (x[kk] >> 1) ^ MAG01[(x[kk] % 2) as usize];
+                }
+                *k = 0;
+            }
+            let mut y = x[*k];
+            y ^= (y << 7) & 0x2b5b2500;
+            y ^= (y << 15) & 0xdb8b0000;
+            y ^= y >> 16;
+            *k += 1;
+            y
+        }
+        // arbitrary non-zero state (any state works for this comparison)
+        let init: [u32; 25] = [
+            0x95f24dab, 0x0b685215, 0xe76ccae7, 0xaf3ec239, 0x715fad23, 0x24a590ad, 0x69e4b5ef,
+            0xbf456141, 0x96bc1b7b, 0xa7bdf825, 0xc1de75b7, 0x8858a9c9, 0x2da87693, 0xb657f9dd,
+            0xffdc8a9f, 0x8121da71, 0x8b823ecb, 0x885d05f5, 0x4e20cd47, 0x5a9ad5d9, 0x512c0c03,
+            0xea857ccd, 0x4cc1d30f, 0x8891a8a1, 0xa6b7aadb,
+        ];
+        let mut g = TwistedGFSR { seed: init, index: wrap!(N_GFSR) };
+        let (mut x, mut k) = (init, 25usize);
+        for _ in 0..10_000 {
+            assert_eq!(g.next_u32_raw(), reference(&mut x, &mut k));
+        }
+    }
+
+    /// REVIEW B6 regression: the generic `Word` helpers must see full-width words.
+    #[test]
+    fn full_width_words_make_choice_and_shuffle_work() {
+        let mut g = TwistedGFSR::new(3);
+        assert!((0..1000).any(|_| g.nextu() >> 32 != 0), "high half must be used");
+        let items: Vec<u32> = (0..10).collect();
+        let mut hist = [0u32; 10];
+        for _ in 0..100_000 {
+            hist[*g.choice(&items) as usize] += 1;
+        }
+        assert!(hist.iter().all(|&c| (9_000..11_000).contains(&c)), "{hist:?}");
+        let perms: std::collections::HashSet<Vec<u32>> = (0..50u64)
+            .map(|s| {
+                let mut v: Vec<u32> = (0..10).collect();
+                TwistedGFSR::new(s).shuffle(&mut v).unwrap();
+                v
+            })
+            .collect();
+        assert!(perms.len() > 45, "shuffle must depend on the seed");
+        let f = (0..10_000).map(|_| g.nextf()).fold(0.0f64, f64::max);
+        assert!(f < 1.0 && f > 0.99);
+    }
 }
