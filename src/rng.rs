@@ -36,6 +36,18 @@ pub trait Word: sealed::Sealed + Copy {
     #[must_use]
     fn to_randi(self, min: Self::Int, max: Self::Int) -> Self::Int;
 
+    /// Exactly uniform draw from `[min, max]` (Lemire's multiply-shift with
+    /// rejection). Starts from `self` and pulls further words from `more` only
+    /// when the first one falls in the rejection zone (probability below
+    /// `range / 2^BITS`); the accepted result equals [`Word::to_randi`] of the
+    /// accepted word.
+    ///
+    /// # Panics
+    ///
+    /// If `min > max`.
+    #[must_use]
+    fn to_randi_uniform<F: FnMut() -> Self>(self, min: Self::Int, max: Self::Int, more: F) -> Self::Int;
+
     /// Maps the word onto the half-open float range `[min, max)`. The result is
     /// always `< max` when `min < max` (rounding could previously produce `max`).
     #[must_use]
@@ -45,6 +57,13 @@ pub trait Word: sealed::Sealed + Copy {
     /// multiply-shift). Equivalent to `to_randi(0, len as Int - 1) as usize`.
     #[must_use]
     fn to_index(self, len: usize) -> usize;
+
+    /// Exactly uniform index in `[0, len)` (Lemire with rejection), pulling
+    /// extra words from `more` only when needed. For `len > 2^BITS` a single
+    /// word cannot be uniform and this falls back to [`Word::to_index`].
+    /// Returns 0 for `len == 0`.
+    #[must_use]
+    fn to_index_uniform<F: FnMut() -> Self>(self, len: usize, more: F) -> usize;
 }
 
 macro_rules! impl_word {
@@ -70,6 +89,33 @@ macro_rules! impl_word {
                     (((self as randi_wide!(u $bits) * range) >> $bits) as [<i $bits>]).wrapping_add(min)
                 }
 
+                #[inline]
+                fn to_randi_uniform<F: FnMut() -> Self>(
+                    self,
+                    min: Self::Int,
+                    max: Self::Int,
+                    mut more: F,
+                ) -> Self::Int {
+                    assert!(min <= max, "to_randi: min must not exceed max");
+                    let range = (max as randi_wide!(i $bits) - min as randi_wide!(i $bits) + 1)
+                        as randi_wide!(u $bits);
+                    if range >> $bits != 0 {
+                        // full range: every word maps to exactly one value
+                        return (self as [<i $bits>]).wrapping_add(min);
+                    }
+                    let s = range as [<u $bits>];
+                    let mut m = self as randi_wide!(u $bits) * range;
+                    if (m as [<u $bits>]) < s {
+                        // 2^BITS mod s: low products below it would make some values
+                        // one count more likely than others
+                        let t = s.wrapping_neg() % s;
+                        while (m as [<u $bits>]) < t {
+                            m = more() as randi_wide!(u $bits) * range;
+                        }
+                    }
+                    ((m >> $bits) as [<i $bits>]).wrapping_add(min)
+                }
+
                 #[inline(always)]
                 fn to_randf(self, min: Self::Float, max: Self::Float) -> Self::Float {
                     let r = self.to_f01() * (max - min) + min;
@@ -80,6 +126,26 @@ macro_rules! impl_word {
                 fn to_index(self, len: usize) -> usize {
                     // u128 so that len > 2^32 cannot overflow with 32-bit words
                     ((self as u128 * len as u128) >> $bits) as usize
+                }
+
+                #[inline]
+                fn to_index_uniform<F: FnMut() -> Self>(self, len: usize, mut more: F) -> usize {
+                    let n = len as u128;
+                    if len == 0 || n > (1u128 << $bits) {
+                        return self.to_index(len);
+                    }
+                    if n == (1u128 << $bits) {
+                        return self as usize;
+                    }
+                    let s = n as [<u $bits>];
+                    let mut m = self as u128 * n;
+                    if (m as [<u $bits>]) < s {
+                        let t = s.wrapping_neg() % s;
+                        while (m as [<u $bits>]) < t {
+                            m = more() as u128 * n;
+                        }
+                    }
+                    (m >> $bits) as usize
                 }
             }
         }
@@ -109,20 +175,22 @@ pub trait Rng {
         self.nextu().to_f01()
     }
 
-    /// Generates an integer in the inclusive range `[min, max]` (see
-    /// [`Word::to_randi`] for the bias bound).
+    /// Generates an integer uniformly in the inclusive range `[min, max]`
+    /// (REVIEW B13: rejection step added; usually consumes one word, rarely
+    /// more — see [`Word::to_randi_uniform`]).
     ///
     /// # Panics
     ///
     /// If `min > max`.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     fn randi(
         &mut self,
         min: <Self::Word as Word>::Int,
         max: <Self::Word as Word>::Int,
     ) -> <Self::Word as Word>::Int {
-        self.nextu().to_randi(min, max)
+        let first = self.nextu();
+        first.to_randi_uniform(min, max, || self.nextu())
     }
 
     /// Generates a float in the half-open range `[min, max)` (strictly below `max`).
@@ -187,6 +255,76 @@ mod tests {
             let r = w.to_randf(lo, lo + 1.0);
             assert!(r >= lo && r < lo + 1.0, "{r}");
         }
+    }
+
+    /// REVIEW B13(c): with range 3*2^30 plain multiply-shift gives value
+    /// residue 0 (mod 3) with probability 1/2 instead of 1/3. `randi` must be
+    /// uniform.
+    #[test]
+    fn randi_is_uniform_for_awkward_ranges() {
+        let min = i32::MIN;
+        let max = (min as i64 + 3 * (1i64 << 30) - 1) as i32;
+        let mut g = crate::SplitMix32::new(1);
+        let n = 300_000;
+        let mut counts = [0usize; 3];
+        for _ in 0..n {
+            let v = g.randi(min, max);
+            assert!(v >= min && v <= max);
+            counts[((v as i64 - min as i64) % 3) as usize] += 1;
+        }
+        for c in counts {
+            let p = c as f64 / n as f64;
+            assert!((p - 1.0 / 3.0).abs() < 0.005, "residue frequencies {counts:?}");
+        }
+        // the old mapping is measurably biased on the same stream
+        let mut g = crate::SplitMix32::new(1);
+        let zeros = (0..n).filter(|_| (g.nextu().to_randi(min, max) as i64 - min as i64) % 3 == 0).count();
+        assert!((zeros as f64 / n as f64 - 0.5).abs() < 0.01);
+    }
+
+    /// The rejection path draws again and keeps the multiply-shift result of
+    /// the accepted word.
+    #[test]
+    fn rejection_redraws_and_accepts_multiply_shift() {
+        struct Script(Vec<u32>);
+        impl Rng for Script {
+            type Word = u32;
+            fn nextu(&mut self) -> u32 {
+                self.0.remove(0)
+            }
+        }
+        let (min, max) = (0i32, 3 * (1 << 29) - 1); // s = 3*2^29, 2^32 mod s = 2^30
+        // low product = 2^29 * (3x mod 8): rejected iff x = 0 or 3 (mod 8)
+        let mut s = Script(vec![0, 3, 8, u32::MAX]);
+        assert_eq!(s.randi(min, max), u32::MAX.to_randi(min, max));
+        assert!(s.0.is_empty());
+        // accepted on the first word: identical to to_randi
+        let mut g = crate::SplitMix32::new(9);
+        let mut h = crate::SplitMix32::new(9);
+        for _ in 0..10_000 {
+            assert_eq!(g.randi(-5, 17), h.nextu().to_randi(-5, 17));
+        }
+        // 64-bit, full and single-value ranges
+        let mut g = crate::SplitMix64::new(3);
+        for _ in 0..1000 {
+            let _ = g.randi(i64::MIN, i64::MAX);
+            assert_eq!(g.randi(42, 42), 42);
+        }
+    }
+
+    #[test]
+    fn to_index_uniform_rejects_like_randi() {
+        let mut g = crate::SplitMix32::new(4);
+        let mut h = crate::SplitMix32::new(4);
+        for len in [1usize, 2, 3, 7, 1000, 3 << 29, 1 << 31] {
+            for _ in 0..2000 {
+                let a = { let x = g.nextu(); x.to_index_uniform(len, || g.nextu()) };
+                let b = { let x = h.nextu(); x.to_randi_uniform(0, (len - 1) as i32, || h.nextu()) } as usize;
+                assert_eq!(a, b, "len {len}");
+            }
+        }
+        assert_eq!(7u32.to_index_uniform(0, || unreachable!()), 0);
+        assert_eq!(u64::MAX.to_index_uniform(usize::MAX, || unreachable!()), usize::MAX - 1);
     }
 
     #[test]

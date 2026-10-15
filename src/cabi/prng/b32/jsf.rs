@@ -56,6 +56,9 @@ pub unsafe extern "C" fn jsf32_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     if count == 0 {
         return;
     }
@@ -307,7 +310,7 @@ mod simd {
         chunk: &mut [f32],
         nt: bool,
         v_mult: __m512,
-        v_min: __m512,
+        v_min: __m512, v_hi: __m512,
     ) {
         let mut out_ptr = chunk.as_mut_ptr();
         let mut remaining = chunk.len();
@@ -316,10 +319,10 @@ mod simd {
 
         if aligned {
             while remaining >= UNROLL {
-                let v0 = rng.randfv(v_mult, v_min);
-                let v1 = rng.randfv(v_mult, v_min);
-                let v2 = rng.randfv(v_mult, v_min);
-                let v3 = rng.randfv(v_mult, v_min);
+                let v0 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v1 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v2 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v3 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
                 _mm512_stream_ps(out_ptr, v0);
                 _mm512_stream_ps(out_ptr.add(JSF32X16), v1);
                 _mm512_stream_ps(out_ptr.add(JSF32X16 * 2), v2);
@@ -328,17 +331,17 @@ mod simd {
                 remaining -= UNROLL;
             }
             while remaining >= JSF32X16 {
-                let v = rng.randfv(v_mult, v_min);
+                let v = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
                 _mm512_stream_ps(out_ptr, v);
                 out_ptr = out_ptr.add(JSF32X16);
                 remaining -= JSF32X16;
             }
         } else {
             while remaining >= UNROLL {
-                let v0 = rng.randfv(v_mult, v_min);
-                let v1 = rng.randfv(v_mult, v_min);
-                let v2 = rng.randfv(v_mult, v_min);
-                let v3 = rng.randfv(v_mult, v_min);
+                let v0 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v1 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v2 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
+                let v3 = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
                 _mm512_storeu_ps(out_ptr, v0);
                 _mm512_storeu_ps(out_ptr.add(JSF32X16), v1);
                 _mm512_storeu_ps(out_ptr.add(JSF32X16 * 2), v2);
@@ -347,7 +350,7 @@ mod simd {
                 remaining -= UNROLL;
             }
             while remaining >= JSF32X16 {
-                let v = rng.randfv(v_mult, v_min);
+                let v = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
                 _mm512_storeu_ps(out_ptr, v);
                 out_ptr = out_ptr.add(JSF32X16);
                 remaining -= JSF32X16;
@@ -356,7 +359,7 @@ mod simd {
 
         if remaining > 0 {
             let mut tmp = [0f32; JSF32X16];
-            let v = rng.randfv(v_mult, v_min);
+            let v = crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi);
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
@@ -450,6 +453,9 @@ mod simd {
         min: i32,
         max: i32,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }
@@ -505,14 +511,14 @@ mod simd {
                 .for_each(|(chunk_idx, chunk)| {
                     let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
                     let v_mult = _mm512_set1_ps(max - min);
+            let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
                     let v_min = _mm512_set1_ps(min);
                     jsf32x16_rand_f32s_chunk(
                         &mut local_rng,
                         chunk,
                         crate::_internal::prefer_nt_for(count, chunk),
                         v_mult,
-                        v_min,
-                    );
+                        v_min, v_hi);
                 });
         }
     }

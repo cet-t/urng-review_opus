@@ -49,7 +49,8 @@ pub trait WordV: sealed::Sealed + Copy + Sized {
     #[must_use]
     unsafe fn to_randi(self, scale: Self::Int, min: Self::Int) -> Self::Int;
 
-    /// Maps every lane onto `min + scale * [0, 1)`.
+    /// Maps every lane to `min + scale * u` with `u` in `[0, 1)`; rounding can make a lane
+    /// equal `min + scale`.
     ///
     /// # Safety
     ///
@@ -167,6 +168,45 @@ impl WordV for __m512i {
     }
 }
 
+/// Lane-wise `min(v, hi)`: clamps `u * (max - min) + min`, which can round up
+/// to `max`, into `[min, max)` (REVIEW B13(d)).
+#[cfg_attr(not(feature = "cabi"), allow(dead_code))]
+pub(crate) trait ClampBelow: Copy {
+    /// # Safety
+    ///
+    /// The CPU must support the instruction set of `Self` (SSE, AVX or
+    /// AVX-512F); callers are `#[target_feature]` kernels.
+    unsafe fn clamp_below(self, hi: Self) -> Self;
+}
+
+impl ClampBelow for __m128 {
+    #[inline(always)]
+    unsafe fn clamp_below(self, hi: Self) -> Self {
+        unsafe { _mm_min_ps(self, hi) }
+    }
+}
+
+impl ClampBelow for __m256 {
+    #[inline(always)]
+    unsafe fn clamp_below(self, hi: Self) -> Self {
+        unsafe { _mm256_min_ps(self, hi) }
+    }
+}
+
+impl ClampBelow for __m512 {
+    #[inline(always)]
+    unsafe fn clamp_below(self, hi: Self) -> Self {
+        unsafe { _mm512_min_ps(self, hi) }
+    }
+}
+
+impl ClampBelow for __m512d {
+    #[inline(always)]
+    unsafe fn clamp_below(self, hi: Self) -> Self {
+        unsafe { _mm512_min_pd(self, hi) }
+    }
+}
+
 /// The 32-bit lane scale for an inclusive range `[min, max]` as used by
 /// [`WordV::to_randi`] (`0` encodes the full 2^32 range).
 #[inline]
@@ -208,7 +248,9 @@ pub unsafe trait RngV {
         unsafe { self.nextuv().to_randi(scale, min) }
     }
 
-    /// Generates lanes in `min + scale * [0, 1)`.
+    /// Generates lanes `min + scale * u` with `u` in `[0, 1)`. Because of rounding a lane
+    /// can equal `min + scale`; clamp if a strict upper bound is required (the C ABI
+    /// `*_rand_f32s` functions do).
     #[inline(always)]
     fn randfv(
         &mut self,

@@ -48,6 +48,9 @@ pub unsafe extern "C" fn splitmix32_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };

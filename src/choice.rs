@@ -5,14 +5,16 @@ pub trait Choice: Rng {
     /// Returns a random element from a slice.
     #[inline(always)]
     fn choice<'a, T>(&mut self, choices: &'a [T]) -> &'a T {
-        let index = self.nextu().to_index(choices.len());
+        let first = self.nextu();
+        let index = first.to_index_uniform(choices.len(), || self.nextu());
         &choices[index]
     }
 
     /// Returns a random mutable element from a slice.
     #[inline(always)]
     fn choice_mut<'a, T>(&mut self, choices: &'a mut [T]) -> &'a mut T {
-        let index = self.nextu().to_index(choices.len());
+        let first = self.nextu();
+        let index = first.to_index_uniform(choices.len(), || self.nextu());
         &mut choices[index]
     }
 }

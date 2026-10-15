@@ -187,7 +187,7 @@ mod simd_chunks {
         unsafe {
             let c_start = c0.wrapping_add((chunk_idx * SQUARES32x8_PAR_CHUNK) as u64);
             let mut c_vec = _mm512_add_epi64(_mm512_set1_epi64(c_start as i64), lane_offsets);
-            let vrange = _mm512_set1_epi64(range as i64);
+            let vrange = _mm512_set1_epi32(range as u32 as i32);
             let vmin = _mm512_set1_epi32(min);
 
             let is_aligned = (chunk.as_ptr() as usize) & 63 == 0;
@@ -207,18 +207,11 @@ mod simd_chunks {
                     vmin: __m512i,
                 ) -> __m512i {
                     unsafe {
-                        let l_u64 = _mm512_cvtepu32_epi64(v0);
-                        let h_u64 = _mm512_cvtepu32_epi64(v1);
-
-                        let res_l = _mm512_srli_epi64(_mm512_mul_epu32(l_u64, vrange), 32);
-                        let res_h = _mm512_srli_epi64(_mm512_mul_epu32(h_u64, vrange), 32);
-
-                        let packed_l = _mm512_cvtepi64_epi32(res_l);
-                        let packed_h = _mm512_cvtepi64_epi32(res_h);
-
-                        let res =
-                            _mm512_inserti64x4::<1>(_mm512_castsi256_si512(packed_l), packed_h);
-                        _mm512_add_epi32(res, vmin)
+                        // vrange holds the 32-bit lane scale (0 = 2^32); the old code
+                        // multiplied by the low half of a 64-bit 2^32, i.e. by 0, so the
+                        // full range collapsed to `min` (REVIEW B13(f))
+                        let x = _mm512_inserti64x4::<1>(_mm512_castsi256_si512(v0), v1);
+                        crate::rngv::to_randi_u32x16(x, vrange, vmin)
                     }
                 }
 
@@ -243,7 +236,7 @@ mod simd_chunks {
                 let mut result = [0u32; SQUARES32x8];
                 _mm256_storeu_si256(result.as_mut_ptr() as *mut _, v);
                 for j in 0..SQUARES32x8 {
-                    dst[j] = ((result[j] as u64 * range) >> 32) as i32 + min;
+                    dst[j] = (((result[j] as u64 * range) >> 32) as i32).wrapping_add(min);
                 }
                 c_vec = _mm512_add_epi64(c_vec, k_step);
             }
@@ -253,7 +246,7 @@ mod simd_chunks {
                 let mut tmp = [0u32; SQUARES32x8];
                 _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, v);
                 for j in 0..final_rem.len() {
-                    final_rem[j] = ((tmp[j] as u64 * range) >> 32) as i32 + min;
+                    final_rem[j] = (((tmp[j] as u64 * range) >> 32) as i32).wrapping_add(min);
                 }
             }
             // Non-temporal stores must be fenced on the issuing thread.
@@ -270,6 +263,7 @@ mod simd_chunks {
         c0: u64,
         k: __m512i,
         combined_scale: f32,
+        hi: f32,
         min: f32,
         lane_offsets: __m512i,
         k_step: __m512i,
@@ -281,6 +275,7 @@ mod simd_chunks {
             let c_start = c0.wrapping_add((chunk_idx * SQUARES32x8_PAR_CHUNK) as u64);
             let mut c_vec = _mm512_add_epi64(_mm512_set1_epi64(c_start as i64), lane_offsets);
             let vscale = _mm512_set1_ps(combined_scale);
+            let vhi = _mm512_set1_ps(hi);
             let vmin = _mm512_set1_ps(min);
 
             let is_aligned = (chunk.as_ptr() as usize) & 63 == 0;
@@ -297,8 +292,8 @@ mod simd_chunks {
                 let res23 =
                     crate::_internal::simd_f01::u32x16(_mm512_inserti64x4::<1>(_mm512_castsi256_si512(v2), v3));
 
-                let f01 = _mm512_add_ps(_mm512_mul_ps(res01, vscale), vmin);
-                let f23 = _mm512_add_ps(_mm512_mul_ps(res23, vscale), vmin);
+                let f01 = _mm512_min_ps(_mm512_add_ps(_mm512_mul_ps(res01, vscale), vmin), vhi);
+                let f23 = _mm512_min_ps(_mm512_add_ps(_mm512_mul_ps(res23, vscale), vmin), vhi);
 
                 if is_aligned {
                     _mm512_stream_ps(dst.as_mut_ptr(), f01);
@@ -318,7 +313,7 @@ mod simd_chunks {
                 let mut result = [0u32; SQUARES32x8];
                 _mm256_storeu_si256(result.as_mut_ptr() as *mut _, v);
                 for j in 0..SQUARES32x8 {
-                    dst[j] = u2f_01!(f32, 32, result[j]) * combined_scale + min;
+                    dst[j] = (u2f_01!(f32, 32, result[j]) * combined_scale + min).min(hi);
                 }
                 c_vec = _mm512_add_epi64(c_vec, k_step);
             }
@@ -328,7 +323,7 @@ mod simd_chunks {
                 let mut tmp = [0u32; SQUARES32x8];
                 _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, v);
                 for j in 0..final_rem.len() {
-                    final_rem[j] = u2f_01!(f32, 32, tmp[j]) * combined_scale + min;
+                    final_rem[j] = (u2f_01!(f32, 32, tmp[j]) * combined_scale + min).min(hi);
                 }
             }
         }
@@ -463,6 +458,9 @@ pub unsafe extern "C" fn squares32_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -485,10 +483,10 @@ pub unsafe extern "C" fn squares32_rand_i32s(
                 let mut chunks4 = chunk.chunks_exact_mut(4);
                 for dst in chunks4.by_ref() {
                     let z3 = y3 + k;
-                    dst[0] = ((*Squares32::compute_yz(y0, y1) as u64 * range) >> 32) as i32 + min;
-                    dst[1] = ((*Squares32::compute_yz(y1, y2) as u64 * range) >> 32) as i32 + min;
-                    dst[2] = ((*Squares32::compute_yz(y2, y3) as u64 * range) >> 32) as i32 + min;
-                    dst[3] = ((*Squares32::compute_yz(y3, z3) as u64 * range) >> 32) as i32 + min;
+                    dst[0] = (((*Squares32::compute_yz(y0, y1) as u64 * range) >> 32) as i32).wrapping_add(min);
+                    dst[1] = (((*Squares32::compute_yz(y1, y2) as u64 * range) >> 32) as i32).wrapping_add(min);
+                    dst[2] = (((*Squares32::compute_yz(y2, y3) as u64 * range) >> 32) as i32).wrapping_add(min);
+                    dst[3] = (((*Squares32::compute_yz(y3, z3) as u64 * range) >> 32) as i32).wrapping_add(min);
                     y0 += k4;
                     y1 += k4;
                     y2 += k4;
@@ -497,7 +495,7 @@ pub unsafe extern "C" fn squares32_rand_i32s(
                 let rem = chunks4.into_remainder();
                 let mut yr = y0;
                 for dst in rem.iter_mut() {
-                    *dst = ((*Squares32::compute_yz(yr, yr + k) as u64 * range) >> 32) as i32 + min;
+                    *dst = (((*Squares32::compute_yz(yr, yr + k) as u64 * range) >> 32) as i32).wrapping_add(min);
                     yr += k;
                 }
             });
@@ -523,6 +521,7 @@ pub unsafe extern "C" fn squares32_rand_f32s(
         let k = rng.k;
         let k4 = k << 2;
         let combined_scale = max - min;
+        let hi = crate::_internal::hi_f32(min, max);
 
         buffer
             .par_chunks_mut(SQUARES32_PAR_CHUNK)
@@ -538,10 +537,10 @@ pub unsafe extern "C" fn squares32_rand_f32s(
                 let mut chunks4 = chunk.chunks_exact_mut(4);
                 for dst in chunks4.by_ref() {
                     let z3 = y3 + k;
-                    dst[0] = u2f_01!(f32, 32, *Squares32::compute_yz(y0, y1)) * combined_scale + min;
-                    dst[1] = u2f_01!(f32, 32, *Squares32::compute_yz(y1, y2)) * combined_scale + min;
-                    dst[2] = u2f_01!(f32, 32, *Squares32::compute_yz(y2, y3)) * combined_scale + min;
-                    dst[3] = u2f_01!(f32, 32, *Squares32::compute_yz(y3, z3)) * combined_scale + min;
+                    dst[0] = (u2f_01!(f32, 32, *Squares32::compute_yz(y0, y1)) * combined_scale + min).min(hi);
+                    dst[1] = (u2f_01!(f32, 32, *Squares32::compute_yz(y1, y2)) * combined_scale + min).min(hi);
+                    dst[2] = (u2f_01!(f32, 32, *Squares32::compute_yz(y2, y3)) * combined_scale + min).min(hi);
+                    dst[3] = (u2f_01!(f32, 32, *Squares32::compute_yz(y3, z3)) * combined_scale + min).min(hi);
                     y0 += k4;
                     y1 += k4;
                     y2 += k4;
@@ -550,7 +549,7 @@ pub unsafe extern "C" fn squares32_rand_f32s(
                 let rem = chunks4.into_remainder();
                 let mut yr = y0;
                 for dst in rem.iter_mut() {
-                    *dst = u2f_01!(f32, 32, *Squares32::compute_yz(yr, yr + k)) * combined_scale + min;
+                    *dst = (u2f_01!(f32, 32, *Squares32::compute_yz(yr, yr + k)) * combined_scale + min).min(hi);
                     yr += k;
                 }
             });
@@ -676,6 +675,9 @@ mod simd {
         min: i32,
         max: i32,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }
@@ -741,6 +743,7 @@ mod simd {
             let c0 = c_arr[0];
             let k = rng.k;
             let combined_scale = max - min;
+        let hi = crate::_internal::hi_f32(min, max);
             let lane_offsets = _mm512_setr_epi64(0, 1, 2, 3, 4, 5, 6, 7);
             let k_step = _mm512_set1_epi64(SQUARES32x8 as i64);
             let k_step2 = _mm512_set1_epi64((SQUARES32x8 * 2) as i64);
@@ -757,6 +760,7 @@ mod simd {
                         c0,
                         k,
                         combined_scale,
+                        hi,
                         min,
                         lane_offsets,
                         k_step,

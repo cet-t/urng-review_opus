@@ -50,7 +50,8 @@ pub trait Shuffle: Rng {
             // Fisher–Yates (Durstenfeld): j is drawn from [0, i], not [0, len).
             // The previous "swap with any index" loop produced biased permutations.
             for i in (1..src.len()).rev() {
-                let j = self.nextu().to_index(i + 1);
+                let first = self.nextu();
+                let j = first.to_index_uniform(i + 1, || self.nextu());
                 src.swap(i, j);
             }
             Ok(())

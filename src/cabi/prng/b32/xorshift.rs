@@ -45,6 +45,9 @@ pub unsafe extern "C" fn xorshift32_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.randi(min, max));
@@ -105,6 +108,9 @@ pub unsafe extern "C" fn xorshift128_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.randi(min, max));

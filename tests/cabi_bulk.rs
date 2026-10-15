@@ -314,3 +314,213 @@ fn counter_mode_bulk_equals_sequential_stream() {
         assert_eq!(x, want.randi(i64::MIN, i64::MAX));
     }
 }
+
+/// REVIEW B13(d): every C ABI `rand_f32s` / `rand_f64s` must stay in
+/// `[min, max)`. Near 1e6 (f32) and 1e15 (f64) one ulp is large compared with
+/// the range width, so `u * (max - min) + min` rounds up to `max` for a few
+/// percent of draws unless the result is clamped.
+#[test]
+fn c_abi_float_ranges_exclude_max() {
+    use urng::*;
+    const N: usize = 200_000;
+    let mut bad: Vec<String> = Vec::new();
+    macro_rules! run {
+        (32, $h:expr, $randf:ident) => {{
+            let (lo, hi) = (1.0e6f32, 1.0e6f32 + 1.0);
+            let mut buf = vec![0f32; N];
+            unsafe { $randf($h, buf.as_mut_ptr(), N, lo, hi) };
+            let n = buf.iter().filter(|&&v| !(v >= lo && v < hi)).count();
+            if n > 0 {
+                bad.push(format!("{}: {n} of {N} outside [min, max)", stringify!($randf)));
+            }
+        }};
+        (64, $h:expr, $randf:ident) => {{
+            let (lo, hi) = (1.0e15f64, 1.0e15f64 + 1.0);
+            let mut buf = vec![0f64; N];
+            unsafe { $randf($h, buf.as_mut_ptr(), N, lo, hi) };
+            let n = buf.iter().filter(|&&v| !(v >= lo && v < hi)).count();
+            if n > 0 {
+                bad.push(format!("{}: {n} of {N} outside [min, max)", stringify!($randf)));
+            }
+        }};
+    }
+    macro_rules! check {
+        ($b:tt, $ctor:ident, $randf:ident, $free:ident, $seed:expr) => {{
+            pastey::paste! {
+                let h = [<$ctor _new>]($seed);
+                run!($b, h, $randf);
+                unsafe { $free(h) };
+            }
+        }};
+    }
+    macro_rules! check_simd {
+        ($b:tt, $ctor:ident, $randf:ident, $free:ident, $seed:expr) => {{
+            #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+            pastey::paste! {
+                let h = [<$ctor _new>]($seed);
+                if !h.is_null() {
+                    run!($b, h, $randf);
+                    unsafe { $free(h) };
+                }
+            }
+        }};
+    }
+        check!(32, philox32, philox32_rand_f32s, philox32_free, 1u32);
+        check_simd!(32, philox32x4x4, philox32x4x4_rand_f32s, philox32x4x4_free, 1u32);
+        check!(32, squares32, squares32_rand_f32s, squares32_free, 1u32);
+        check_simd!(32, squares32x8, squares32x8_rand_f32s, squares32x8_free, 1u32);
+        check!(64, philox64, philox64_rand_f64s, philox64_free, 1u64);
+        check!(64, threefish256, threefish256_rand_f64s, threefish256_free, 1u64);
+        check!(32, threefry32x4, threefry32x4_rand_f32s, threefry32x4_free, 1u32);
+        check!(32, threefry32x2, threefry32x2_rand_f32s, threefry32x2_free, 1u32);
+        check!(32, jsf32, jsf32_rand_f32s, jsf32_free, 1u32);
+        check_simd!(32, jsf32x16, jsf32x16_rand_f32s, jsf32x16_free, 1u32);
+        check!(32, mt19937, mt19937_rand_f32s, mt19937_free, 1u32);
+        check!(32, sfmt19937, sfmt19937_rand_f32s, sfmt19937_free, 1u64);
+        check!(32, sfmt607, sfmt607_rand_f32s, sfmt607_free, 1u64);
+        check!(32, sfmt216091, sfmt216091_rand_f32s, sfmt216091_free, 1u64);
+        check!(32, pcg32, pcg32_rand_f32s, pcg32_free, 1u32);
+        check_simd!(32, pcg32x8, pcg32x8_rand_f32s, pcg32x8_free, 1u32);
+        check!(32, sfc32, sfc32_rand_f32s, sfc32_free, 1u32);
+        check_simd!(32, sfc32x4, sfc32x4_rand_f32s, sfc32x4_free, 1u32);
+        check_simd!(32, sfc32x8, sfc32x8_rand_f32s, sfc32x8_free, 1u32);
+        check_simd!(32, sfc32x16, sfc32x16_rand_f32s, sfc32x16_free, 1u32);
+        check!(32, splitmix32, splitmix32_rand_f32s, splitmix32_free, 1u32);
+        check!(32, xoroshiro64ss, xoroshiro64ss_rand_f32s, xoroshiro64ss_free, 1u32);
+        check_simd!(32, xoroshiro64ssx8, xoroshiro64ssx8_rand_f32s, xoroshiro64ssx8_free, 1u32);
+        check_simd!(32, xoroshiro64ssx16, xoroshiro64ssx16_rand_f32s, xoroshiro64ssx16_free, 1u32);
+        check!(32, xorshift32, xorshift32_rand_f32s, xorshift32_free, 1u32);
+        check!(32, xorshift128, xorshift128_rand_f32s, xorshift128_free, 1u32);
+        check!(32, xoshiro128pp, xoshiro128pp_rand_f32s, xoshiro128pp_free, 1u32);
+        check!(32, xoshiro128ss, xoshiro128ss_rand_f32s, xoshiro128ss_free, 1u32);
+        check_simd!(32, xoshiro128ppx16, xoshiro128ppx16_rand_f32s, xoshiro128ppx16_free, 1u32);
+        check_simd!(32, xoshiro128ssx16, xoshiro128ssx16_rand_f32s, xoshiro128ssx16_free, 1u32);
+        check!(64, biski64, biski64_rand_f64s, biski64_free, 1u64);
+        check_simd!(64, biski64x8, biski64x8_rand_f64s, biski64x8_free, 1u64);
+        check!(64, cet64, cet64_rand_f64s, cet64_free, 1u64);
+        check!(64, cet256, cet256_rand_f64s, cet256_free, 1u64);
+        check!(64, mt1993764, mt1993764_rand_f64s, mt1993764_free, 1u64);
+        check!(64, sfmt1993764, sfmt_rand_f64s, sfmt1993764_free, 1u64);
+        check!(64, sfc64, sfc64_rand_f64s, sfc64_free, 1u64);
+        check!(64, splitmix64, splitmix64_rand_f64s, splitmix64_free, 1u64);
+        check!(64, twisted_gfsr, twisted_gfsr_rand_f64s, twisted_gfsr_free, 1u64);
+        check!(64, xoroshiro128pp, xoroshiro128pp_rand_f64s, xoroshiro128pp_free, 1u64);
+        check!(64, xoroshiro128ss, xoroshiro128ss_rand_f64s, xoroshiro128ss_free, 1u64);
+        check!(64, xorshift64, xorshift64_rand_f64s, xorshift64_free, 1u64);
+        check!(64, xoshiro256pp, xoshiro256pp_rand_f64s, xoshiro256pp_free, 1u64);
+        check!(64, xoshiro256ss, xoshiro256ss_rand_f64s, xoshiro256ss_free, 1u64);
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// REVIEW B13(a, b, f): every C ABI `rand_i32s` / `rand_i64s` handles the full
+/// range without overflow (a debug-build overflow would abort the process)
+/// and without collapsing to a constant, stays inside narrow ranges, and
+/// writes nothing for `min > max`.
+#[test]
+fn c_abi_integer_ranges() {
+    use urng::*;
+    const N: usize = 50_000;
+    let mut bad: Vec<String> = Vec::new();
+    macro_rules! run {
+        (32, $h:expr, $randi:ident) => {{
+            let mut buf = vec![0i32; N];
+            unsafe { $randi($h, buf.as_mut_ptr(), N, i32::MIN, i32::MAX) };
+            let distinct = buf.iter().collect::<HashSet<_>>().len();
+            if distinct < N * 9 / 10 {
+                bad.push(format!("{}: full range gave only {distinct} distinct values", stringify!($randi)));
+            }
+            unsafe { $randi($h, buf.as_mut_ptr(), N, -3, 4) };
+            if !buf.iter().all(|v| (-3..=4).contains(v)) {
+                bad.push(format!("{}: value outside [-3, 4]", stringify!($randi)));
+            }
+            let mut untouched = [11i32; 64];
+            unsafe { $randi($h, untouched.as_mut_ptr(), 64, 1, 0) };
+            if untouched != [11; 64] {
+                bad.push(format!("{}: wrote for min > max", stringify!($randi)));
+            }
+        }};
+        (64, $h:expr, $randi:ident) => {{
+            let mut buf = vec![0i64; N];
+            unsafe { $randi($h, buf.as_mut_ptr(), N, i64::MIN, i64::MAX) };
+            let distinct = buf.iter().collect::<HashSet<_>>().len();
+            if distinct < N * 9 / 10 {
+                bad.push(format!("{}: full range gave only {distinct} distinct values", stringify!($randi)));
+            }
+            unsafe { $randi($h, buf.as_mut_ptr(), N, -3, 4) };
+            if !buf.iter().all(|v| (-3..=4).contains(v)) {
+                bad.push(format!("{}: value outside [-3, 4]", stringify!($randi)));
+            }
+            let mut untouched = [11i64; 64];
+            unsafe { $randi($h, untouched.as_mut_ptr(), 64, 1, 0) };
+            if untouched != [11; 64] {
+                bad.push(format!("{}: wrote for min > max", stringify!($randi)));
+            }
+        }};
+    }
+    macro_rules! check {
+        ($b:tt, $ctor:ident, $randi:ident, $free:ident, $seed:expr) => {{
+            pastey::paste! {
+                let h = [<$ctor _new>]($seed);
+                run!($b, h, $randi);
+                unsafe { $free(h) };
+            }
+        }};
+    }
+    macro_rules! check_simd {
+        ($b:tt, $ctor:ident, $randi:ident, $free:ident, $seed:expr) => {{
+            #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+            pastey::paste! {
+                let h = [<$ctor _new>]($seed);
+                if !h.is_null() {
+                    run!($b, h, $randi);
+                    unsafe { $free(h) };
+                }
+            }
+        }};
+    }
+        check!(32, philox32, philox32_rand_i32s, philox32_free, 1u32);
+        check_simd!(32, philox32x4x4, philox32x4x4_rand_i32s, philox32x4x4_free, 1u32);
+        check!(32, squares32, squares32_rand_i32s, squares32_free, 1u32);
+        check_simd!(32, squares32x8, squares32x8_rand_i32s, squares32x8_free, 1u32);
+        check!(64, philox64, philox64_rand_i64s, philox64_free, 1u64);
+        check!(64, threefish256, threefish256_rand_i64s, threefish256_free, 1u64);
+        check!(32, threefry32x4, threefry32x4_rand_i32s, threefry32x4_free, 1u32);
+        check!(32, threefry32x2, threefry32x2_rand_i32s, threefry32x2_free, 1u32);
+        check!(32, jsf32, jsf32_rand_i32s, jsf32_free, 1u32);
+        check_simd!(32, jsf32x16, jsf32x16_rand_i32s, jsf32x16_free, 1u32);
+        check!(32, mt19937, mt19937_rand_i32s, mt19937_free, 1u32);
+        check!(32, sfmt19937, sfmt19937_rand_i32s, sfmt19937_free, 1u64);
+        check!(32, sfmt607, sfmt607_rand_i32s, sfmt607_free, 1u64);
+        check!(32, sfmt216091, sfmt216091_rand_i32s, sfmt216091_free, 1u64);
+        check!(32, pcg32, pcg32_rand_i32s, pcg32_free, 1u32);
+        check_simd!(32, pcg32x8, pcg32x8_rand_i32s, pcg32x8_free, 1u32);
+        check!(32, sfc32, sfc32_rand_i32s, sfc32_free, 1u32);
+        check_simd!(32, sfc32x4, sfc32x4_rand_i32s, sfc32x4_free, 1u32);
+        check_simd!(32, sfc32x8, sfc32x8_rand_i32s, sfc32x8_free, 1u32);
+        check_simd!(32, sfc32x16, sfc32x16_rand_i32s, sfc32x16_free, 1u32);
+        check!(32, splitmix32, splitmix32_rand_i32s, splitmix32_free, 1u32);
+        check!(32, xoroshiro64ss, xoroshiro64ss_rand_i32s, xoroshiro64ss_free, 1u32);
+        check_simd!(32, xoroshiro64ssx8, xoroshiro64ssx8_rand_i32s, xoroshiro64ssx8_free, 1u32);
+        check_simd!(32, xoroshiro64ssx16, xoroshiro64ssx16_rand_i32s, xoroshiro64ssx16_free, 1u32);
+        check!(32, xorshift32, xorshift32_rand_i32s, xorshift32_free, 1u32);
+        check!(32, xorshift128, xorshift128_rand_i32s, xorshift128_free, 1u32);
+        check!(32, xoshiro128pp, xoshiro128pp_rand_i32s, xoshiro128pp_free, 1u32);
+        check!(32, xoshiro128ss, xoshiro128ss_rand_i32s, xoshiro128ss_free, 1u32);
+        check_simd!(32, xoshiro128ppx16, xoshiro128ppx16_rand_i32s, xoshiro128ppx16_free, 1u32);
+        check_simd!(32, xoshiro128ssx16, xoshiro128ssx16_rand_i32s, xoshiro128ssx16_free, 1u32);
+        check!(64, biski64, biski64_rand_i64s, biski64_free, 1u64);
+        check_simd!(64, biski64x8, biski64x8_rand_i64s, biski64x8_free, 1u64);
+        check!(64, cet64, cet64_rand_i64s, cet64_free, 1u64);
+        check!(64, cet256, cet256_rand_i64s, cet256_free, 1u64);
+        check!(64, mt1993764, mt1993764_rand_i64s, mt1993764_free, 1u64);
+        check!(64, sfmt1993764, sfmt1993764_rand_i64s, sfmt1993764_free, 1u64);
+        check!(64, sfc64, sfc64_rand_i64s, sfc64_free, 1u64);
+        check!(64, splitmix64, splitmix64_rand_i64s, splitmix64_free, 1u64);
+        check!(64, twisted_gfsr, twisted_gfsr_rand_i64s, twisted_gfsr_free, 1u64);
+        check!(64, xoroshiro128pp, xoroshiro128pp_rand_i64s, xoroshiro128pp_free, 1u64);
+        check!(64, xoroshiro128ss, xoroshiro128ss_rand_i64s, xoroshiro128ss_free, 1u64);
+        check!(64, xorshift64, xorshift64_rand_i64s, xorshift64_free, 1u64);
+        check!(64, xoshiro256pp, xoshiro256pp_rand_i64s, xoshiro256pp_free, 1u64);
+        check!(64, xoshiro256ss, xoshiro256ss_rand_i64s, xoshiro256ss_free, 1u64);
+    assert!(bad.is_empty(), "{bad:#?}");
+}

@@ -72,6 +72,9 @@ pub unsafe extern "C" fn cet64_rand_i64s(
     min: i64,
     max: i64,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
@@ -176,6 +179,9 @@ pub unsafe extern "C" fn cet256_rand_i64s(
     min: i64,
     max: i64,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();

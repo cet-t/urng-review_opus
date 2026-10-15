@@ -24,7 +24,13 @@ pub trait RngW<const WIDTH: usize> {
         self.nextu().map(<Self::Word as crate::rng::Word>::to_f01)
     }
 
-    /// Generates `WIDTH` integers uniformly in the inclusive range `[min, max]`.
+    /// Generates `WIDTH` integers in the inclusive range `[min, max]`, one word per lane
+    /// (multiply-shift without rejection: each value's probability is within
+    /// `range / 2^BITS` of uniform; use [`crate::Rng::randi`] for an exact draw).
+    ///
+    /// # Panics
+    ///
+    /// If `min > max`.
     #[must_use]
     #[inline(always)]
     fn randi(

@@ -83,11 +83,14 @@ pub unsafe extern "C" fn splitmix64_rand_i64s(
     min: i64,
     max: i64,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let range = (max as i128 - min as i128 + 1) as u128;
-        sm64_fill(buffer, rng.s, |x| ((x as u128 * range) >> 64) as i64 + min);
+        sm64_fill(buffer, rng.s, |x| (((x as u128 * range) >> 64) as i64).wrapping_add(min));
         rng.s += wrap!(count as u64) * SPLITMIX64_GAMMA;
     }
 }
@@ -103,8 +106,7 @@ pub unsafe extern "C" fn splitmix64_rand_f64s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        let mult = max - min;
-        sm64_fill(buffer, rng.s, |x| u2f_01!(f64, 64, x) * mult + min);
+        sm64_fill(buffer, rng.s, |x| crate::rng::Word::to_randf(x, min, max));
         rng.s += (count as u64).wrapping_mul(SPLITMIX64_GAMMA);
     }
 }

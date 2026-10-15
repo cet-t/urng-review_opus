@@ -365,6 +365,21 @@ pub(crate) unsafe fn fill_chunk_auto<T: Copy, const N: usize, F: FnMut() -> [T; 
     unsafe { fill_chunk(chunk, generate) }
 }
 
+/// The largest value a draw in `[min, max)` may take: `max.next_down()` when
+/// `max > min`, otherwise `+inf` (no clamping; matches [`crate::Word::to_randf`]).
+#[inline]
+#[cfg_attr(not(feature = "cabi"), allow(dead_code))]
+pub(crate) fn hi_f32(min: f32, max: f32) -> f32 {
+    if max > min { max.next_down() } else { f32::INFINITY }
+}
+
+/// `f64` version of [`hi_f32`].
+#[inline]
+#[cfg_attr(not(feature = "cabi"), allow(dead_code))]
+pub(crate) fn hi_f64(min: f64, max: f64) -> f64 {
+    if max > min { max.next_down() } else { f64::INFINITY }
+}
+
 /// A counter-mode block generator whose [`crate::rng::Rng::nextu`] stream is
 /// `block(ctr), block(ctr + 1), ...` served word by word through a ring buffer.
 #[cfg(feature = "cabi")]

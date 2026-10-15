@@ -48,6 +48,9 @@ pub unsafe extern "C" fn pcg32_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -251,7 +254,7 @@ mod simd {
             let mut tmp = [0u32; PCG32X8_LANE];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut __m256i, out256);
             for i in 0..PCG32X8_LANE {
-                dst[i] = ((tmp[i] as u64).wrapping_mul(range) >> 32) as i32 + min;
+                dst[i] = (((tmp[i] as u64).wrapping_mul(range) >> 32) as i32).wrapping_add(min);
             }
         }
 
@@ -261,7 +264,7 @@ mod simd {
             let mut tmp = [0u32; PCG32X8_LANE];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut __m256i, out256);
             for j in 0..rem.len() {
-                rem[j] = ((tmp[j] as u64).wrapping_mul(range) >> 32) as i32 + min;
+                rem[j] = (((tmp[j] as u64).wrapping_mul(range) >> 32) as i32).wrapping_add(min);
             }
         }
     }
@@ -278,6 +281,7 @@ mod simd {
         mult_hi: __m512i,
         mask32: __m512i,
         scale: f32,
+        hi: f32,
         min: f32,
     ) {
         let mut state = _mm512_loadu_si512(start_state.as_ptr() as *const _);
@@ -289,7 +293,7 @@ mod simd {
             let mut tmp = [0u32; PCG32X8_LANE];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut __m256i, out256);
             for i in 0..PCG32X8_LANE {
-                dst[i] = u2f_01!(f32, 32, tmp[i]) * scale + min;
+                dst[i] = (u2f_01!(f32, 32, tmp[i]) * scale + min).min(hi);
             }
         }
 
@@ -299,7 +303,7 @@ mod simd {
             let mut tmp = [0u32; PCG32X8_LANE];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut __m256i, out256);
             for j in 0..rem.len() {
-                rem[j] = u2f_01!(f32, 32, tmp[j]) * scale + min;
+                rem[j] = (u2f_01!(f32, 32, tmp[j]) * scale + min).min(hi);
             }
         }
     }
@@ -454,6 +458,9 @@ mod simd {
         min: i32,
         max: i32,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }
@@ -519,6 +526,7 @@ mod simd {
             let mult_hi = _mm512_set1_epi64(0x5851F42D_i64);
             let mask32 = _mm512_set1_epi64(0xFFFFFFFF_i64);
             let scale = max - min;
+            let hi = crate::_internal::hi_f32(min, max);
             let chunk_starts = pcg32x8_chunk_starts(count, state0, inc0);
 
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -535,6 +543,7 @@ mod simd {
                         mult_hi,
                         mask32,
                         scale,
+                        hi,
                         min,
                     )
                 });

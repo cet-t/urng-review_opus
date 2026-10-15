@@ -85,6 +85,9 @@ pub unsafe extern "C" fn xoroshiro64ss_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     if count == 0 {
         return;
     }
@@ -339,7 +342,7 @@ mod simd {
         chunk: &mut [f32],
         nt: bool,
         v_mult: __m256,
-        v_min: __m256,
+        v_min: __m256, v_hi: __m256,
     ) {
         let mut out_ptr = chunk.as_mut_ptr();
         let mut remaining = chunk.len();
@@ -347,36 +350,36 @@ mod simd {
 
         if aligned {
             while remaining >= XOROSHIRO64SSX8_UNROLL {
-                _mm256_stream_ps(out_ptr, rng.randfv(v_mult, v_min));
-                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8), rng.randfv(v_mult, v_min));
-                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8 * 2), rng.randfv(v_mult, v_min));
-                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8 * 3), rng.randfv(v_mult, v_min));
+                _mm256_stream_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8 * 2), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_stream_ps(out_ptr.add(XOROSHIRO64SSX8 * 3), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX8_UNROLL);
                 remaining -= XOROSHIRO64SSX8_UNROLL;
             }
             while remaining >= XOROSHIRO64SSX8 {
-                _mm256_stream_ps(out_ptr, rng.randfv(v_mult, v_min));
+                _mm256_stream_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX8);
                 remaining -= XOROSHIRO64SSX8;
             }
         } else {
             while remaining >= XOROSHIRO64SSX8_UNROLL {
-                _mm256_storeu_ps(out_ptr, rng.randfv(v_mult, v_min));
-                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8), rng.randfv(v_mult, v_min));
-                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8 * 2), rng.randfv(v_mult, v_min));
-                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8 * 3), rng.randfv(v_mult, v_min));
+                _mm256_storeu_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8 * 2), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm256_storeu_ps(out_ptr.add(XOROSHIRO64SSX8 * 3), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX8_UNROLL);
                 remaining -= XOROSHIRO64SSX8_UNROLL;
             }
             while remaining >= XOROSHIRO64SSX8 {
-                _mm256_storeu_ps(out_ptr, rng.randfv(v_mult, v_min));
+                _mm256_storeu_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX8);
                 remaining -= XOROSHIRO64SSX8;
             }
         }
         if remaining > 0 {
             let mut tmp = [0f32; XOROSHIRO64SSX8];
-            _mm256_storeu_ps(tmp.as_mut_ptr(), rng.randfv(v_mult, v_min));
+            _mm256_storeu_ps(tmp.as_mut_ptr(), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
         // Non-temporal stores must be fenced on the issuing thread before the data is
@@ -451,6 +454,9 @@ mod simd {
         min: i32,
         max: i32,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }
@@ -495,6 +501,7 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
             let v_mult = _mm256_set1_ps(max - min);
+            let v_hi = _mm256_set1_ps(crate::_internal::hi_f32(min, max));
             let v_min = _mm256_set1_ps(min);
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
@@ -507,8 +514,7 @@ mod simd {
                         chunk,
                         crate::_internal::prefer_nt_for(count, chunk),
                         v_mult,
-                        v_min,
-                    );
+                        v_min, v_hi);
                 });
         }
     }
@@ -720,7 +726,7 @@ mod simd {
         chunk: &mut [f32],
         nt: bool,
         v_mult: __m512,
-        v_min: __m512,
+        v_min: __m512, v_hi: __m512,
     ) {
         let mut out_ptr = chunk.as_mut_ptr();
         let mut remaining = chunk.len();
@@ -728,36 +734,36 @@ mod simd {
 
         if aligned {
             while remaining >= XOROSHIRO64SSX16_UNROLL {
-                _mm512_stream_ps(out_ptr, rng.randfv(v_mult, v_min));
-                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16), rng.randfv(v_mult, v_min));
-                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16 * 2), rng.randfv(v_mult, v_min));
-                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16 * 3), rng.randfv(v_mult, v_min));
+                _mm512_stream_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16 * 2), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_stream_ps(out_ptr.add(XOROSHIRO64SSX16 * 3), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX16_UNROLL);
                 remaining -= XOROSHIRO64SSX16_UNROLL;
             }
             while remaining >= XOROSHIRO64SSX16 {
-                _mm512_stream_ps(out_ptr, rng.randfv(v_mult, v_min));
+                _mm512_stream_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX16);
                 remaining -= XOROSHIRO64SSX16;
             }
         } else {
             while remaining >= XOROSHIRO64SSX16_UNROLL {
-                _mm512_storeu_ps(out_ptr, rng.randfv(v_mult, v_min));
-                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16), rng.randfv(v_mult, v_min));
-                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16 * 2), rng.randfv(v_mult, v_min));
-                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16 * 3), rng.randfv(v_mult, v_min));
+                _mm512_storeu_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16 * 2), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
+                _mm512_storeu_ps(out_ptr.add(XOROSHIRO64SSX16 * 3), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX16_UNROLL);
                 remaining -= XOROSHIRO64SSX16_UNROLL;
             }
             while remaining >= XOROSHIRO64SSX16 {
-                _mm512_storeu_ps(out_ptr, rng.randfv(v_mult, v_min));
+                _mm512_storeu_ps(out_ptr, crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
                 out_ptr = out_ptr.add(XOROSHIRO64SSX16);
                 remaining -= XOROSHIRO64SSX16;
             }
         }
         if remaining > 0 {
             let mut tmp = [0f32; XOROSHIRO64SSX16];
-            _mm512_storeu_ps(tmp.as_mut_ptr(), rng.randfv(v_mult, v_min));
+            _mm512_storeu_ps(tmp.as_mut_ptr(), crate::rngv::ClampBelow::clamp_below(rng.randfv(v_mult, v_min), v_hi));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
         // Non-temporal stores must be fenced on the issuing thread before the data is
@@ -832,6 +838,9 @@ mod simd {
         min: i32,
         max: i32,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }
@@ -876,6 +885,7 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
             let v_mult = _mm512_set1_ps(max - min);
+            let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
             let v_min = _mm512_set1_ps(min);
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
@@ -888,8 +898,7 @@ mod simd {
                         chunk,
                         crate::_internal::prefer_nt_for(count, chunk),
                         v_mult,
-                        v_min,
-                    );
+                        v_min, v_hi);
                 });
         }
     }

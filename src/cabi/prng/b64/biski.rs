@@ -74,6 +74,9 @@ pub unsafe extern "C" fn biski64_rand_i64s(
     min: i64,
     max: i64,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -489,7 +492,7 @@ mod simd {
         #[inline(always)]
         unsafe fn apply_range(tmp: &[u64; 48], dst: &mut [i64], range: u128, min: i64) {
             for (i, v) in dst.iter_mut().enumerate() {
-                *v = ((tmp[i] as u128 * range) >> 64) as i64 + min;
+                *v = (((tmp[i] as u128 * range) >> 64) as i64).wrapping_add(min);
             }
         }
 
@@ -539,6 +542,7 @@ mod simd {
         let one = _mm512_set1_pd(1.0f64);
         let range = _mm512_set1_pd(max - min);
         let min_pd = _mm512_set1_pd(min);
+        let hi_pd = _mm512_set1_pd(crate::_internal::hi_f64(min, max));
 
         macro_rules! make_state {
             ($group:expr) => {{
@@ -605,7 +609,7 @@ mod simd {
                 macro_rules! to_randf {
                     ($u:expr) => {{
                         let f = u64x8_to_f64x8($u, exp_bits, one);
-                        _mm512_fmadd_pd(f, range, min_pd)
+                        _mm512_min_pd(_mm512_fmadd_pd(f, range, min_pd), hi_pd)
                     }};
                 }
                 (
@@ -711,6 +715,9 @@ mod simd {
         min: i64,
         max: i64,
     ) {
+        if min > max {
+            return; // empty range: write nothing (a panic cannot cross the C ABI)
+        }
         if count == 0 {
             return;
         }

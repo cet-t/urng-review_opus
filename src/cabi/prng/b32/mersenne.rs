@@ -54,6 +54,9 @@ pub unsafe extern "C" fn mt19937_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -130,6 +133,9 @@ pub unsafe extern "C" fn sfmt19937_rand_i32s(
     min: i32,
     max: i32,
 ) {
+    if min > max {
+        return; // empty range: write nothing (a panic cannot cross the C ABI)
+    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -210,6 +216,9 @@ macro_rules! impl_sfmt_cabi {
             min: i32,
             max: i32,
         ) {
+            if min > max {
+                return; // empty range: write nothing (a panic cannot cross the C ABI)
+            }
             unsafe {
                 let Some(rng) = ptr.as_mut() else { return };
                 let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
