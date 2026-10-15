@@ -44,7 +44,8 @@ impl Rng for Sfc64 {
         let res = self.a + self.b + self.counter;
         self.a = self.b ^ (self.b >> 11);
         self.b = self.c + (self.c << 3);
-        self.c = res.rotate_left(24);
+        // PractRand sfc64: c = rotl(c, 24) + tmp (the old code dropped c entirely)
+        self.c = self.c.rotate_left(24) + res;
 
         self.counter += 1;
         *res
@@ -127,8 +128,8 @@ pub mod simd {
                 // b = c + (c << 3)
                 self.b = _mm512_add_epi64(self.c, _mm512_slli_epi64(self.c, 3));
 
-                // c = rotate_left(res, 24) = (res << 24) | (res >> 40)
-                self.c = _mm512_or_si512(_mm512_slli_epi64(res, 24), _mm512_srli_epi64(res, 40));
+                // c = rotl(c, 24) + res
+                self.c = _mm512_add_epi64(_mm512_rol_epi64(self.c, 24), res);
 
                 // counter += 1
                 self.counter = _mm512_add_epi64(self.counter, one);
@@ -201,6 +202,60 @@ mod tests {
 
     crate::safe_test! { Sfc64 }
 
-    #[cfg(all(feature = "simd", target_feature = "avx512f"))]
-    crate::unsafe_test! { Sfc64x8 }
+    /// PractRand reference vector (as published in `rand_sfc`): a = b = c = 1,
+    /// counter = 1, 18 warm-up steps, then these 16 outputs.
+    #[test]
+    fn sfc64_practrand_vector() {
+        let mut r = Sfc64 { a: wrap!(1), b: wrap!(1), c: wrap!(1), counter: wrap!(1) };
+        for _ in 0..18 {
+            let _ = r.nextu();
+        }
+        let expected: [u64; 16] = [
+            0xAD6FDC729FEEF3C1, 0x2A20433D733F77D5, 0x0310E21369647420, 0x331A176BC71DCABC,
+            0x53118F35C2494D94, 0xA3A99DE7E77E16BF, 0xA7B1B70A3E59A1FF, 0x8E1127B28667EB3C,
+            0x3FC589DC124CF6E8, 0x81E0EAAACEB81D81, 0x79F534652D262DF6, 0x87F70C8214E186C5,
+            0x67AF9C007B825917, 0x5134AEC9998D8629, 0x205AA24994068634, 0x1C762918DBA3E139,
+        ];
+        for e in expected {
+            assert_eq!(r.nextu(), e);
+        }
+        let mut g = Sfc64::new(9);
+        let mut st = [*g.a, *g.b, *g.c, *g.counter];
+        for _ in 0..100_000 {
+            assert_eq!(g.nextu(), crate::_reftest::sfc64(&mut st));
+        }
+    }
+
+    /// Every lane of the AVX-512 version equals the scalar generator.
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn sfc64x8_lanes_match_scalar() {
+        if !std::arch::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let mut sg = SplitMix64::new(5);
+        let mut lanes: Vec<Sfc64> = (0..8)
+            .map(|_| Sfc64 {
+                a: wrap!(sg.nextu_const()),
+                b: wrap!(sg.nextu_const()),
+                c: wrap!(sg.nextu_const()),
+                counter: wrap!(1),
+            })
+            .collect();
+        let mut v = unsafe { Sfc64x8::new(5) };
+        for _ in 0..10_000 {
+            let got = unsafe { v.nextu() };
+            for (i, l) in lanes.iter_mut().enumerate() {
+                assert_eq!(got[i], l.nextu());
+            }
+        }
+    }
+}
+
+impl Sfc64 {
+    /// Builds the generator from a raw `(a, b, c, counter)` state (test helper).
+    #[cfg(test)]
+    pub(crate) fn from_state(s: [u64; 4]) -> Self {
+        Self { a: wrap!(s[0]), b: wrap!(s[1]), c: wrap!(s[2]), counter: wrap!(s[3]) }
+    }
 }

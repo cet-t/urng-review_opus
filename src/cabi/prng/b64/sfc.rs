@@ -1,4 +1,4 @@
-﻿use std::slice::from_raw_parts_mut;
+use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -155,7 +155,7 @@ mod simd {
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
     #[allow(unsafe_op_in_unsafe_fn, unused_assignments)]
-    unsafe fn sfc64x8_next_u64s_chunk(chunk_idx: usize, chunk: &mut [u64], nt: bool, seed: u64) {
+    pub(super) unsafe fn sfc64x8_next_u64s_chunk(chunk_idx: usize, chunk: &mut [u64], nt: bool, seed: u64) {
         const STRIDE: u64 = 0x9E3779B97F4A7C15u64;
         // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
         // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
@@ -215,13 +215,13 @@ mod simd {
                 b3 = _mm512_add_epi64(c3, _mm512_slli_epi64(c3, 3));
                 b4 = _mm512_add_epi64(c4, _mm512_slli_epi64(c4, 3));
                 b5 = _mm512_add_epi64(c5, _mm512_slli_epi64(c5, 3));
-                // c = rotl(res, 24)
-                c0 = _mm512_rol_epi64(res0, 24);
-                c1 = _mm512_rol_epi64(res1, 24);
-                c2 = _mm512_rol_epi64(res2, 24);
-                c3 = _mm512_rol_epi64(res3, 24);
-                c4 = _mm512_rol_epi64(res4, 24);
-                c5 = _mm512_rol_epi64(res5, 24);
+                // c = rotl(c, 24) + res (PractRand sfc64)
+                c0 = _mm512_add_epi64(_mm512_rol_epi64(c0, 24), res0);
+                c1 = _mm512_add_epi64(_mm512_rol_epi64(c1, 24), res1);
+                c2 = _mm512_add_epi64(_mm512_rol_epi64(c2, 24), res2);
+                c3 = _mm512_add_epi64(_mm512_rol_epi64(c3, 24), res3);
+                c4 = _mm512_add_epi64(_mm512_rol_epi64(c4, 24), res4);
+                c5 = _mm512_add_epi64(_mm512_rol_epi64(c5, 24), res5);
                 // counter += 1
                 ctr0 = _mm512_add_epi64(ctr0, one);
                 ctr1 = _mm512_add_epi64(ctr1, one);
@@ -305,4 +305,38 @@ mod simd {
             *rng = Sfc64x8::new(seed);
         }
     }
+    #[cfg(test)]
+    pub(super) use sfc64x8_next_u64s_chunk as sfc64x8_next_u64s_chunk_for_test;
 } // mod simd
+
+#[cfg(all(test, feature = "simd", target_arch = "x86_64"))]
+mod tests {
+    use super::simd::sfc64x8_next_u64s_chunk_for_test as chunk_fn;
+    use crate::prng::b64::{Sfc64, SplitMix64};
+    use crate::rng::Rng;
+
+    /// The bulk kernel must be 48 interleaved scalar SFC64 streams whose seeds are
+    /// derived from disjoint (chunk, lane) indices (REVIEW B3, B10).
+    #[test]
+    fn sfc64x8_chunk_equals_scalar_streams() {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return;
+        }
+        const STRIDE: u64 = 0x9E3779B97F4A7C15;
+        let (seed, chunk_idx) = (0x1234_5678u64, 3usize);
+        let mut out = vec![0u64; 48 * 50 + 5];
+        unsafe { chunk_fn(chunk_idx, &mut out, false, seed) };
+        let base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
+        for lane in 0..48usize {
+            let s = SplitMix64::compute(base.wrapping_add((lane as u64).wrapping_mul(STRIDE)));
+            let mut sm = SplitMix64::new(s);
+            let mut r = Sfc64::from_state([sm.nextu(), sm.nextu(), sm.nextu(), 1]);
+            for t in 0..50 {
+                assert_eq!(out[t * 48 + lane], r.nextu(), "lane {lane} step {t}");
+            }
+            if lane < 5 {
+                assert_eq!(out[50 * 48 + lane], r.nextu(), "tail lane {lane}");
+            }
+        }
+    }
+}

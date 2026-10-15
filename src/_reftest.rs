@@ -600,3 +600,12 @@ pub mod gf2 {
         FACTORS_2_128_M1.iter().all(|&p| !is_ident(&pow(t, n / p)))
     }
 }
+
+/// Reference stream of the SIMD SplitMix32 variants (`urng::SplitMix32x16`,
+/// `urng::wide::SplitMix32xN`): element e is fmix32(seed + (e + 1) * gamma).
+pub fn fmix32_stream(seed: u32, e: u32) -> u32 {
+    let mut z = seed.wrapping_add(0x9E3779B9u32.wrapping_mul(e + 1));
+    z = (z ^ (z >> 16)).wrapping_mul(0x85EBCA6B);
+    z = (z ^ (z >> 13)).wrapping_mul(0xC2B2AE35);
+    z ^ (z >> 16)
+}

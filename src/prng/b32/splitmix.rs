@@ -65,7 +65,7 @@ pub mod simd {
     use std::arch::x86_64::*;
 
     #[cfg(target_arch = "x86_64")]
-    use crate::{RngV, SplitMix32};
+    use crate::RngV;
 
     pub const SPLITMIX32X16: usize = 16;
     pub const SPLITMIX32X16_PAR_CHUNK: usize = 8192;
@@ -97,12 +97,14 @@ pub mod simd {
         /// The caller must ensure the CPU supports the `avx512f` target feature.
         #[target_feature(enable = "avx512f")]
         pub unsafe fn new(seed: u32) -> Self {
-            let mut sm = SplitMix32::new(seed);
-
-            let mut s = [0u32; SPLITMIX32X16];
-            for i in 0..SPLITMIX32X16 {
-                s[i] = sm.nextu_const();
-            }
+            // Lane i starts at seed + (i + 1) * gamma and every lane advances by
+            // 16 * gamma, so the 16 lanes interleave one Weyl sequence without
+            // overlap: output element e is fmix32(seed + (e + 1) * gamma), exactly
+            // the stream of `urng::wide::SplitMix32x16`. (Previously the lanes
+            // started at unrelated values on overlapping cycles.)
+            let s: [u32; SPLITMIX32X16] = std::array::from_fn(|i| {
+                seed.wrapping_add(SPLITMIX32_GAMMA.wrapping_mul(i as u32 + 1))
+            });
 
             unsafe {
                 Self {
@@ -111,7 +113,10 @@ pub mod simd {
             }
         }
 
-        /// Computes the SplitMix32 output for 16 lanes at once.
+        /// Murmur3 `fmix32` finalizer on 16 lanes.
+        ///
+        /// The previous version replaced both multiplications by additions, which
+        /// left the high bits of consecutive outputs almost perfectly predictable.
         ///
         /// # Safety
         ///
@@ -123,9 +128,9 @@ pub mod simd {
 
             let mut z = state;
             z = _mm512_xor_si512(z, _mm512_srli_epi32(z, 16));
-            z = _mm512_add_epi32(z, c1);
+            z = _mm512_mullo_epi32(z, c1);
             z = _mm512_xor_si512(z, _mm512_srli_epi32(z, 13));
-            z = _mm512_add_epi32(z, c2);
+            z = _mm512_mullo_epi32(z, c2);
             _mm512_xor_si512(z, _mm512_srli_epi32(z, 16))
         }
     }
@@ -152,4 +157,31 @@ mod tests {
     use super::*;
 
     crate::safe_test! { SplitMix32 }
+
+    /// REVIEW B10: the AVX-512 finalizer used additions instead of
+    /// multiplications and the lanes overlapped. Lanes must now reproduce the
+    /// interleaved reference stream, and the top bits of consecutive outputs
+    /// must not follow a fixed increment.
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn splitmix32x16_matches_reference_stream() {
+        use crate::RngV;
+        if !std::arch::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let mut v = unsafe { SplitMix32x16::new(77) };
+        let mut lane0 = Vec::new();
+        for t in 0..20_000u32 {
+            let got: [u32; 16] = unsafe { std::mem::transmute(v.nextuv()) };
+            for i in 0..16 {
+                assert_eq!(got[i], crate::_reftest::fmix32_stream(77, 16 * t + i as u32));
+            }
+            lane0.push(got[0]);
+        }
+        let diffs: std::collections::HashSet<u32> = lane0
+            .windows(2)
+            .map(|w| ((w[1] >> 19).wrapping_sub(w[0] >> 19)) & 0x1FFF)
+            .collect();
+        assert!(diffs.len() > 7000, "top-13-bit increments take only {} values", diffs.len());
+    }
 }

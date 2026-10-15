@@ -345,11 +345,29 @@ mod tests {
     use std::arch::x86_64::*;
 
     use super::*;
-    #[cfg(feature = "simd")]
 
+    // (a stray `#[cfg(feature = "simd")]` used to hide this test in default builds)
     crate::safe_test! { Sfc32 }
     #[cfg(feature = "simd")]
     crate::safe_test! { Sfc32x4 }
+
+    /// PractRand reference vector (as published in `rand_sfc`): a = 0, b = 2,
+    /// c = 1, counter = 1, 15 warm-up steps, then these 16 outputs.
+    #[test]
+    fn sfc32_practrand_vector() {
+        let mut r = Sfc32 { a: wrap!(0), b: wrap!(2), c: wrap!(1), counter: wrap!(1) };
+        for _ in 0..15 {
+            let _ = r.nextu();
+        }
+        let expected: [u32; 16] = [
+            0x03B80BB8, 0xA87DBC7E, 0x1787178C, 0x4C7B7234, 0xC65DADE2, 0x2C692349, 0xF52C2153,
+            0xDF098072, 0x9D49B03C, 0x9562381A, 0xC9B41738, 0x64B75E54, 0x36CE9B32, 0xF106947E,
+            0x0AFC726B, 0x549BBC87,
+        ];
+        for e in expected {
+            assert_eq!(r.nextu(), e);
+        }
+    }
     #[cfg(feature = "simd")]
     crate::unsafe_test! {
         Sfc32x8,

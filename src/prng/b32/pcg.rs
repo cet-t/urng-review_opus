@@ -28,7 +28,9 @@ impl Pcg32 {
         let mut seedgen = sm64_from_seed32!(seed);
         Pcg32 {
             state: wrap!(seedgen.nextu_const()),
-            inc: wrap!(seedgen.nextu_const()),
+            // The LCG increment must be odd (Hull-Dobell); an even increment cut the
+            // period below 2^64 for half of all seeds (down to 2^45 observed).
+            inc: wrap!(seedgen.nextu_const() | 1),
         }
     }
 }
@@ -98,7 +100,7 @@ pub mod simd {
             state.iter_mut().for_each(|v| *v = seedgen.nextu_const());
 
             let mut inc = [0u64; PCG32X8_LANE];
-            inc.iter_mut().for_each(|v| *v = seedgen.nextu_const());
+            inc.iter_mut().for_each(|v| *v = seedgen.nextu_const() | 1); // odd increment
 
             unsafe {
                 Pcg32x8 {
@@ -173,4 +175,48 @@ mod tests {
     use super::*;
 
     crate::safe_test! { Pcg32 }
+
+    const MULT: u64 = 6364136223846793005;
+
+    /// `pcg32_srandom_r(42, 54)` followed by `pcg32_random_r`, i.e. the output
+    /// of the reference `pcg32-demo` (pcg-c-basic, O'Neill).
+    #[test]
+    fn pcg32_reference_demo_vector() {
+        let inc = (54u64 << 1) | 1;
+        let mut state = 0u64.wrapping_mul(MULT).wrapping_add(inc);
+        state = state.wrapping_add(42).wrapping_mul(MULT).wrapping_add(inc);
+        let mut r = Pcg32 { state: wrap!(state), inc: wrap!(inc) };
+        for e in [0xa15c02b7u32, 0x7b47f409, 0xba1d3330, 0x83d2f293, 0xbfa4784b, 0xcbed606e] {
+            assert_eq!(r.nextu(), e);
+        }
+    }
+
+    /// REVIEW B10: the increment was not forced odd, which halved (or worse)
+    /// the LCG period for half of all seeds.
+    #[test]
+    fn pcg32_increment_is_always_odd() {
+        for seed in 0..20_000u32 {
+            assert_eq!(*Pcg32::new(seed).inc & 1, 1, "seed {seed}");
+        }
+    }
+
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn pcg32x8_lanes_match_scalar_and_have_odd_increments() {
+        if !std::arch::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let mut v = unsafe { Pcg32x8::new(11) };
+        let st: [u64; 8] = unsafe { std::mem::transmute(v.state) };
+        let inc: [u64; 8] = unsafe { std::mem::transmute(v.inc) };
+        assert!(inc.iter().all(|i| i & 1 == 1));
+        let mut lanes: Vec<Pcg32> =
+            (0..8).map(|i| Pcg32 { state: wrap!(st[i]), inc: wrap!(inc[i]) }).collect();
+        for _ in 0..10_000 {
+            let got = unsafe { v.nextu() };
+            for (i, l) in lanes.iter_mut().enumerate() {
+                assert_eq!(got[i], l.nextu());
+            }
+        }
+    }
 }

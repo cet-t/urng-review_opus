@@ -33,7 +33,7 @@ macro_rules! impl_pcg32_variants {
                     let mut seedgen = SplitMix64::new(seed);
                     Self {
                         state: [<u64x $lanes>]::from([0u64; $lanes].map(|_| seedgen.nextu())),
-                        inc: [<u64x $lanes>]::from([0u64; $lanes].map(|_| seedgen.nextu())),
+                        inc: [<u64x $lanes>]::from([0u64; $lanes].map(|_| seedgen.nextu() | 1)), // odd increment
                     }
                 }
 
