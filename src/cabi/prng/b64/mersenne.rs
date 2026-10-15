@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::prng::b64::{Mt1993764, Sfmt1993764};
 use crate::rng::Rng;
@@ -12,35 +11,35 @@ pub extern "C" fn mt1993764_new(seed: u64) -> *mut Mt1993764 {
 /// Frees a `Mt1993764` instance previously created by [`mt1993764_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt1993764_free(ptr: *mut Mt1993764) {
+pub unsafe extern "C" fn mt1993764_free(ptr: *mut Mt1993764) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 /// Fills `out[0..count]` with raw `u64` random values.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt1993764_next_u64s(ptr: *mut Mt1993764, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn mt1993764_next_u64s(ptr: *mut Mt1993764, out: *mut u64, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Mt1993764::new, |r| r.nextu());
     }
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[0, 1)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt1993764_next_f64s(ptr: *mut Mt1993764, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn mt1993764_next_f64s(ptr: *mut Mt1993764, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Mt1993764::new, |r| r.nextf());
     }
 }
 /// Fills `out[0..count]` with `i64` values uniformly distributed in `[min, max]`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt1993764_rand_i64s(
+pub unsafe extern "C" fn mt1993764_rand_i64s(
     ptr: *mut Mt1993764,
     out: *mut i64,
     count: usize,
@@ -48,8 +47,8 @@ pub extern "C" fn mt1993764_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Mt1993764::new, |r| {
             r.randi(min, max)
         });
@@ -57,7 +56,7 @@ pub extern "C" fn mt1993764_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[min, max)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt1993764_rand_f64s(
+pub unsafe extern "C" fn mt1993764_rand_f64s(
     ptr: *mut Mt1993764,
     out: *mut f64,
     count: usize,
@@ -65,8 +64,8 @@ pub extern "C" fn mt1993764_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Mt1993764::new, |r| {
             r.randf(min, max)
         });
@@ -82,35 +81,35 @@ pub extern "C" fn sfmt1993764_new(seed: u64) -> *mut Sfmt1993764 {
 /// Frees a `Sfmt1993764` instance previously created by [`sfmt1993764_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt1993764_free(ptr: *mut Sfmt1993764) {
+pub unsafe extern "C" fn sfmt1993764_free(ptr: *mut Sfmt1993764) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 /// Fills `out[0..count]` with raw `u64` random values.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt1993764_next_u64s(ptr: *mut Sfmt1993764, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn sfmt1993764_next_u64s(ptr: *mut Sfmt1993764, out: *mut u64, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Sfmt1993764::new, |r| r.nextu());
     }
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[0, 1)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt1993764_next_f64s(ptr: *mut Sfmt1993764, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn sfmt1993764_next_f64s(ptr: *mut Sfmt1993764, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Sfmt1993764::new, |r| r.nextf());
     }
 }
 /// Fills `out[0..count]` with `i64` values uniformly distributed in `[min, max]`.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt1993764_rand_i64s(
+pub unsafe extern "C" fn sfmt1993764_rand_i64s(
     ptr: *mut Sfmt1993764,
     out: *mut i64,
     count: usize,
@@ -118,8 +117,8 @@ pub extern "C" fn sfmt1993764_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Sfmt1993764::new, |r| {
             r.randi(min, max)
         });
@@ -127,7 +126,7 @@ pub extern "C" fn sfmt1993764_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[min, max)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt_rand_f64s(
+pub unsafe extern "C" fn sfmt_rand_f64s(
     ptr: *mut Sfmt1993764,
     out: *mut f64,
     count: usize,
@@ -135,8 +134,8 @@ pub extern "C" fn sfmt_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed64(buffer, rng.nextu(), Sfmt1993764::new, |r| {
             r.randf(min, max)
         });

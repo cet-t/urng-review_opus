@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::Rng;
 use crate::prng::b32::Jsf32;
@@ -12,7 +11,7 @@ pub extern "C" fn jsf32_new(seed: u32) -> *mut Jsf32 {
 
 /// Frees the memory of a `Jsf32` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn jsf32_free(ptr: *mut Jsf32) {
+pub unsafe extern "C" fn jsf32_free(ptr: *mut Jsf32) {
     if !ptr.is_null() {
         unsafe {
             drop(Box::from_raw(ptr));
@@ -22,35 +21,35 @@ pub extern "C" fn jsf32_free(ptr: *mut Jsf32) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn jsf32_next_u32s(ptr: *mut Jsf32, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn jsf32_next_u32s(ptr: *mut Jsf32, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, seed, Jsf32::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn jsf32_next_f32s(ptr: *mut Jsf32, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn jsf32_next_f32s(ptr: *mut Jsf32, out: *mut f32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let base_seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn jsf32_rand_i32s(
+pub unsafe extern "C" fn jsf32_rand_i32s(
     ptr: *mut Jsf32,
     out: *mut i32,
     count: usize,
@@ -61,16 +60,16 @@ pub extern "C" fn jsf32_rand_i32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let base_seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.randi(min, max));
     }
 }
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn jsf32_rand_f32s(
+pub unsafe extern "C" fn jsf32_rand_f32s(
     ptr: *mut Jsf32,
     out: *mut f32,
     count: usize,
@@ -81,17 +80,17 @@ pub extern "C" fn jsf32_rand_f32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let base_seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.randf(min, max));
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use crate::_internal::chunk_seed32;
     #[cfg(target_arch = "x86_64")]
@@ -100,7 +99,7 @@ mod simd {
     use rayon::prelude::*;
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
-    use std::{ptr, slice::from_raw_parts_mut};
+    use std::ptr;
 
     // --- Jsf32x16 (AVX-512) ---
 
@@ -162,7 +161,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -223,7 +226,11 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -286,7 +293,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -349,18 +360,26 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     /// Creates a new `Jsf32x16` instance.
     /// The caller is responsible for freeing the memory using `jsf32x16_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn jsf32x16_new(seed: u32) -> *mut Jsf32x16 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Jsf32x16::new(seed))) }
     }
 
     /// Frees the memory of a `Jsf32x16` instance.
     #[unsafe(no_mangle)]
-    pub extern "C" fn jsf32x16_free(ptr: *mut Jsf32x16) {
+    pub unsafe extern "C" fn jsf32x16_free(ptr: *mut Jsf32x16) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -368,18 +387,18 @@ mod simd {
 
     /// Fills the output buffer with the next random `u32` values.
     #[unsafe(no_mangle)]
-    pub extern "C" fn jsf32x16_next_u32s(ptr: *mut Jsf32x16, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn jsf32x16_next_u32s(ptr: *mut Jsf32x16, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
@@ -396,18 +415,18 @@ mod simd {
 
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     #[unsafe(no_mangle)]
-    pub extern "C" fn jsf32x16_next_f32s(ptr: *mut Jsf32x16, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn jsf32x16_next_f32s(ptr: *mut Jsf32x16, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
@@ -424,7 +443,7 @@ mod simd {
 
     /// Fills the output buffer with random `i32` values in the range [min, max].
     #[unsafe(no_mangle)]
-    pub extern "C" fn jsf32x16_rand_i32s(
+    pub unsafe extern "C" fn jsf32x16_rand_i32s(
         ptr: *mut Jsf32x16,
         out: *mut i32,
         count: usize,
@@ -435,19 +454,19 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
                     let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
-                    let v_range = _mm512_set1_epi64(max as i64 - min as i64 + 1);
+                    let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     jsf32x16_rand_i32s_chunk(
                         &mut local_rng,
@@ -462,7 +481,7 @@ mod simd {
 
     /// Fills the output buffer with random `f32` values in the range [min, max).
     #[unsafe(no_mangle)]
-    pub extern "C" fn jsf32x16_rand_f32s(
+    pub unsafe extern "C" fn jsf32x16_rand_f32s(
         ptr: *mut Jsf32x16,
         out: *mut f32,
         count: usize,
@@ -473,13 +492,13 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()

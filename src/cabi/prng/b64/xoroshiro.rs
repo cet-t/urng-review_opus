@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -52,7 +51,7 @@ pub extern "C" fn xoroshiro128pp_new(seed: u64) -> *mut Xoroshiro128Pp {
 /// Frees a `Xoroshiro128Pp` instance previously created by [`xoroshiro128pp_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128pp_free(ptr: *mut Xoroshiro128Pp) {
+pub unsafe extern "C" fn xoroshiro128pp_free(ptr: *mut Xoroshiro128Pp) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -60,27 +59,27 @@ pub extern "C" fn xoroshiro128pp_free(ptr: *mut Xoroshiro128Pp) {
 
 /// Fills `out[0..count]` with raw `u64` random values using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128pp_next_u64s(ptr: *mut Xoroshiro128Pp, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn xoroshiro128pp_next_u64s(ptr: *mut Xoroshiro128Pp, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Pp::new, |r| r.nextu());
     }
 }
 /// Fills `out[0..count]` with `f64` values in `[0, 1)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128pp_next_f64s(ptr: *mut Xoroshiro128Pp, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn xoroshiro128pp_next_f64s(ptr: *mut Xoroshiro128Pp, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Pp::new, |r| r.nextf());
     }
 }
 /// Fills `out[0..count]` with `i64` values in `[min, max]` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128pp_rand_i64s(
+pub unsafe extern "C" fn xoroshiro128pp_rand_i64s(
     ptr: *mut Xoroshiro128Pp,
     out: *mut i64,
     count: usize,
@@ -88,8 +87,8 @@ pub extern "C" fn xoroshiro128pp_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Pp::new, |r| {
             r.randi(min, max)
@@ -98,7 +97,7 @@ pub extern "C" fn xoroshiro128pp_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values in `[min, max)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128pp_rand_f64s(
+pub unsafe extern "C" fn xoroshiro128pp_rand_f64s(
     ptr: *mut Xoroshiro128Pp,
     out: *mut f64,
     count: usize,
@@ -106,8 +105,8 @@ pub extern "C" fn xoroshiro128pp_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Pp::new, |r| {
             r.randf(min, max)
@@ -124,7 +123,7 @@ pub extern "C" fn xoroshiro128ss_new(seed: u64) -> *mut Xoroshiro128Ss {
 /// Frees a `Xoroshiro128Ss` instance previously created by [`xoroshiro128ss_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128ss_free(ptr: *mut Xoroshiro128Ss) {
+pub unsafe extern "C" fn xoroshiro128ss_free(ptr: *mut Xoroshiro128Ss) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -132,27 +131,27 @@ pub extern "C" fn xoroshiro128ss_free(ptr: *mut Xoroshiro128Ss) {
 
 /// Fills `out[0..count]` with raw `u64` random values using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128ss_next_u64s(ptr: *mut Xoroshiro128Ss, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn xoroshiro128ss_next_u64s(ptr: *mut Xoroshiro128Ss, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Ss::new, |r| r.nextu());
     }
 }
 /// Fills `out[0..count]` with `f64` values in `[0, 1)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128ss_next_f64s(ptr: *mut Xoroshiro128Ss, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn xoroshiro128ss_next_f64s(ptr: *mut Xoroshiro128Ss, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Ss::new, |r| r.nextf());
     }
 }
 /// Fills `out[0..count]` with `i64` values in `[min, max]` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128ss_rand_i64s(
+pub unsafe extern "C" fn xoroshiro128ss_rand_i64s(
     ptr: *mut Xoroshiro128Ss,
     out: *mut i64,
     count: usize,
@@ -160,8 +159,8 @@ pub extern "C" fn xoroshiro128ss_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Ss::new, |r| {
             r.randi(min, max)
@@ -170,7 +169,7 @@ pub extern "C" fn xoroshiro128ss_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values in `[min, max)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro128ss_rand_f64s(
+pub unsafe extern "C" fn xoroshiro128ss_rand_f64s(
     ptr: *mut Xoroshiro128Ss,
     out: *mut f64,
     count: usize,
@@ -178,8 +177,8 @@ pub extern "C" fn xoroshiro128ss_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
         xoro_fill(buffer, base_seed, Xoroshiro128Ss::new, |r| {
             r.randf(min, max)

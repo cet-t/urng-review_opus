@@ -48,19 +48,23 @@ impl Rng for Sfc32 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
-    use crate::{Rng, SplitMix32, i2f_bits, u2f_01};
+    use crate::prng::b32::jsf::simd::rotl8;
+    use crate::{Rng, SplitMix32, WordV, i2f_bits, u2f_01};
 
     pub(crate) const SFC32X4: usize = 4;
 
-    /// 4-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG.
-    /// This implementation uses SSE2 instructions to generate 4 random numbers in parallel.
+    /// 4-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG (SSE2,
+    /// part of the x86_64 baseline, so the API is safe).
+    ///
+    /// Lane `i` is the scalar SFC32 with `(a, b, c)` = SplitMix32 outputs
+    /// `3i, 3i+1, 3i+2` and counter 1.
     ///
     /// # Example
     /// ```
@@ -89,7 +93,7 @@ pub mod simd {
                 b[i] = seedgen.nextu();
                 c[i] = seedgen.nextu();
             }
-
+            // SAFETY: SSE2 is part of the x86_64 baseline.
             unsafe {
                 Self {
                     a: _mm_loadu_si128(a.as_ptr() as *const _),
@@ -102,6 +106,7 @@ pub mod simd {
 
         #[inline(always)]
         pub(crate) fn nextuv(&mut self) -> __m128i {
+            // SAFETY: SSE2 is part of the x86_64 baseline.
             unsafe {
                 let tmp = _mm_add_epi32(_mm_add_epi32(self.a, self.b), self.counter);
                 self.counter = _mm_add_epi32(self.counter, _mm_set1_epi32(1));
@@ -117,36 +122,26 @@ pub mod simd {
 
         #[inline(always)]
         pub(crate) fn nextfv(&mut self) -> __m128 {
-            unsafe { crate::_internal::simd_f01::u32x4(self.nextuv()) }
+            // SAFETY: SSE2 baseline.
+            unsafe { self.nextuv().to_f01() }
         }
 
+        /// Lanes in `[v_min, v_min + v_range)`; a `v_range` lane of 0 means 2^32.
         #[inline(always)]
         pub(crate) fn randiv(&mut self, v_range: __m128i, v_min: __m128i) -> __m128i {
-            unsafe {
-                let uv = self.nextuv();
-                let hi = _mm_set1_epi64x((0xffff_ffffu64 << 32) as i64);
-                let res_even = _mm_srli_epi64(_mm_mul_epu32(uv, v_range), 32);
-                let prod_odd = _mm_and_si128(
-                    _mm_mul_epu32(_mm_srli_epi64(uv, 32), _mm_srli_epi64(v_range, 32)),
-                    hi,
-                );
-                _mm_add_epi32(_mm_or_si128(res_even, prod_odd), v_min)
-            }
+            // SAFETY: SSE2 baseline.
+            unsafe { self.nextuv().to_randi(v_range, v_min) }
         }
 
         #[inline(always)]
         pub(crate) fn randfv(&mut self, v_mult: __m128, v_min: __m128) -> __m128 {
-            unsafe {
-                _mm_add_ps(
-                    _mm_mul_ps(crate::_internal::simd_f01::u32x4(self.nextuv()), v_mult),
-                    v_min,
-                )
-            }
+            // SAFETY: SSE2 baseline.
+            unsafe { self.nextuv().to_randf(v_mult, v_min) }
         }
 
         #[inline(always)]
         pub fn nextu(&mut self) -> [u32; SFC32X4] {
-            unsafe { std::mem::transmute(self.nextuv()) }
+            bytemuck::cast(self.nextuv())
         }
 
         #[inline(always)]
@@ -157,15 +152,18 @@ pub mod simd {
 
     pub(crate) const SFC32X8: usize = 8;
 
-    /// 8-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG.
-    /// This implementation uses AVX2 instructions to generate 8 random numbers in parallel.
+    /// 8-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG (AVX2).
+    ///
+    /// Lane layout as for [`Sfc32x4`].
     ///
     /// # Example
     /// ```no_run
     /// use urng::Sfc32x8;
     ///
-    /// let mut rng = unsafe { Sfc32x8::new(1) };
-    /// let _ = rng.nextu();
+    /// if std::arch::is_x86_feature_detected!("avx2") {
+    ///     let mut rng = unsafe { Sfc32x8::new(1) };
+    ///     let _ = rng.nextu();
+    /// }
     /// ```
     #[repr(C, align(64))]
     pub struct Sfc32x8 {
@@ -178,7 +176,8 @@ pub mod simd {
     impl Sfc32x8 {
         /// # Safety
         ///
-        /// The caller must ensure the CPU supports the `avx2` target feature.
+        /// The caller must ensure the CPU supports the `avx2` target feature
+        /// (the type no longer needs AVX-512VL).
         #[target_feature(enable = "avx2")]
         pub fn new(seed: u32) -> Self {
             let mut seedgen = SplitMix32::new(seed);
@@ -202,42 +201,37 @@ pub mod simd {
 
         #[inline]
         #[target_feature(enable = "avx2")]
-        pub(crate) unsafe fn nextuv(&mut self) -> __m256i {
+        pub(crate) fn nextuv(&mut self) -> __m256i {
             let tmp = _mm256_add_epi32(_mm256_add_epi32(self.a, self.b), self.counter);
             self.counter = _mm256_add_epi32(self.counter, _mm256_set1_epi32(1));
             self.a = _mm256_xor_si256(self.b, _mm256_srli_epi32(self.b, 9));
             self.b = _mm256_add_epi32(self.c, _mm256_slli_epi32(self.c, 3));
-            self.c = _mm256_add_epi32(unsafe { _mm256_rol_epi32(self.c, 21) }, tmp);
+            self.c = _mm256_add_epi32(rotl8::<21, 11>(self.c), tmp);
             tmp
         }
 
         #[inline]
         #[target_feature(enable = "avx2")]
-        pub(crate) unsafe fn nextfv(&mut self) -> __m256 {
+        pub(crate) fn nextfv(&mut self) -> __m256 {
             unsafe { crate::_internal::simd_f01::u32x8(self.nextuv()) }
         }
 
         #[inline]
         #[target_feature(enable = "avx2")]
-        pub(crate) unsafe fn randiv(&mut self, v_range: __m256i, v_min: __m256i) -> __m256i {
-            const MERGE_MASK: u8 = 0xAA;
-            let v_u32 = unsafe { self.nextuv() };
-            let res_even = _mm256_srli_epi64(_mm256_mul_epu32(v_u32, v_range), 32);
-            let prod_odd = _mm256_mul_epu32(_mm256_srli_epi64(v_u32, 32), v_range);
-            let merged = unsafe { _mm256_mask_blend_epi32(MERGE_MASK, res_even, prod_odd) };
-            _mm256_add_epi32(merged, v_min)
+        pub(crate) fn randiv(&mut self, v_range: __m256i, v_min: __m256i) -> __m256i {
+            crate::rngv::to_randi_u32x8(self.nextuv(), v_range, v_min)
         }
 
         #[inline]
         #[target_feature(enable = "avx2")]
-        pub(crate) unsafe fn randfv(&mut self, v_mult: __m256, v_min: __m256) -> __m256 {
-            let base = unsafe { crate::_internal::simd_f01::u32x8(self.nextuv()) };
-            _mm256_add_ps(_mm256_mul_ps(base, v_mult), v_min)
+        pub(crate) fn randfv(&mut self, v_mult: __m256, v_min: __m256) -> __m256 {
+            crate::rngv::to_randf_u32x8(self.nextuv(), v_mult, v_min)
         }
 
         #[inline(always)]
         pub fn nextu(&mut self) -> [u32; SFC32X8] {
-            unsafe { std::mem::transmute(self.nextuv()) }
+            // SAFETY: a value exists only if `new`'s AVX2 requirement was met.
+            bytemuck::cast(unsafe { self.nextuv() })
         }
 
         #[inline(always)]
@@ -248,15 +242,16 @@ pub mod simd {
 
     pub(crate) const SFC32X16: usize = 16;
 
-    /// 16-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG.
-    /// This implementation uses AVX-512F instructions to generate 16 random numbers in parallel.
+    /// 16-way SIMD implementation of SFC (Small Fast Chaotic) 32-bit RNG (AVX-512F).
     ///
     /// # Example
     /// ```no_run
     /// use urng::Sfc32x16;
     ///
-    /// let mut rng = unsafe { Sfc32x16::new(1) };
-    /// let _ = rng.nextu();
+    /// if std::arch::is_x86_feature_detected!("avx512f") {
+    ///     let mut rng = unsafe { Sfc32x16::new(1) };
+    ///     let _ = rng.nextu();
+    /// }
     /// ```
     #[repr(C, align(64))]
     pub struct Sfc32x16 {
@@ -293,43 +288,36 @@ pub mod simd {
 
         #[inline]
         #[target_feature(enable = "avx512f")]
-        pub(crate) unsafe fn nextuv(&mut self) -> __m512i {
+        pub(crate) fn nextuv(&mut self) -> __m512i {
             let tmp = _mm512_add_epi32(_mm512_add_epi32(self.a, self.b), self.counter);
             self.counter = _mm512_add_epi32(self.counter, _mm512_set1_epi32(1));
             self.a = _mm512_xor_si512(self.b, _mm512_srli_epi32(self.b, 9));
             self.b = _mm512_add_epi32(self.c, _mm512_slli_epi32(self.c, 3));
-            self.c = _mm512_add_epi32(_mm512_rol_epi32(self.c, 21), tmp);
+            self.c = _mm512_add_epi32(_mm512_rol_epi32::<21>(self.c), tmp);
             tmp
         }
 
         #[inline]
         #[target_feature(enable = "avx512f")]
-        pub(crate) unsafe fn nextfv(&mut self) -> __m512 {
+        pub(crate) fn nextfv(&mut self) -> __m512 {
             unsafe { crate::_internal::simd_f01::u32x16(self.nextuv()) }
         }
 
         #[inline]
         #[target_feature(enable = "avx512f")]
-        pub(crate) unsafe fn randiv(&mut self, v_range: __m512i, v_min: __m512i) -> __m512i {
-            const MERGE_MASK: u16 = 0xAAAA;
-            let v_u32 = unsafe { self.nextuv() };
-            let prod_even = _mm512_mul_epu32(v_u32, v_range);
-            let res_even = _mm512_srli_epi64(prod_even, 32);
-            let v_u32_shifted = _mm512_srli_epi64(v_u32, 32);
-            let prod_odd = _mm512_mul_epu32(v_u32_shifted, v_range);
-            let merged = _mm512_mask_blend_epi32(MERGE_MASK, res_even, prod_odd);
-            _mm512_add_epi32(merged, v_min)
+        pub(crate) fn randiv(&mut self, v_range: __m512i, v_min: __m512i) -> __m512i {
+            crate::rngv::to_randi_u32x16(self.nextuv(), v_range, v_min)
         }
 
         #[inline]
         #[target_feature(enable = "avx512f")]
-        pub(crate) unsafe fn randfv(&mut self, v_mult: __m512, v_min: __m512) -> __m512 {
-            let base = unsafe { crate::_internal::simd_f01::u32x16(self.nextuv()) };
-            _mm512_add_ps(_mm512_mul_ps(base, v_mult), v_min)
+        pub(crate) fn randfv(&mut self, v_mult: __m512, v_min: __m512) -> __m512 {
+            crate::rngv::to_randf_u32x16(self.nextuv(), v_mult, v_min)
         }
 
         #[inline(always)]
         pub fn nextu(&mut self) -> [u32; SFC32X16] {
+            // SAFETY: a value exists only if `new`'s AVX-512F requirement was met.
             unsafe { std::mem::transmute(self.nextuv()) }
         }
 
@@ -338,17 +326,16 @@ pub mod simd {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     use std::arch::x86_64::*;
 
     use super::*;
 
-    // (a stray `#[cfg(feature = "simd")]` used to hide this test in default builds)
+    // (a stray `#[cfg(all(feature = "simd", target_arch = "x86_64"))]` used to hide this test in default builds)
     crate::safe_test! { Sfc32 }
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     crate::safe_test! { Sfc32x4 }
 
     /// PractRand reference vector (as published in `rand_sfc`): a = 0, b = 2,
@@ -368,13 +355,55 @@ mod tests {
             assert_eq!(r.nextu(), e);
         }
     }
-    #[cfg(feature = "simd")]
-    crate::unsafe_test! {
-        Sfc32x8,
-        Sfc32x16
+    /// Lane-vs-scalar equality for the AVX2 / AVX-512 versions, including the
+    /// ranged paths. (Replaces a determinism-only test that ran AVX-512 code
+    /// without checking the CPU.) REVIEW B8: Sfc32x8 now needs only AVX2.
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn sfc32_wide_simd_lanes_match_scalar() {
+        fn lanes(seed: u32, n: usize) -> Vec<Sfc32> {
+            let mut sg = SplitMix32::new(seed);
+            (0..n)
+                .map(|_| Sfc32 { a: sg.nextu().into(), b: sg.nextu().into(), c: sg.nextu().into(), counter: 1.into() })
+                .collect()
+        }
+        let (min, max) = (i32::MIN, i32::MAX - 5);
+        let scale = crate::rngv::scale32(min, max);
+        if std::arch::is_x86_feature_detected!("avx2") {
+            let mut v = unsafe { Sfc32x8::new(4) };
+            let mut s = lanes(4, 8);
+            for _ in 0..5000 {
+                let got = v.nextu();
+                for i in 0..8 {
+                    assert_eq!(got[i], s[i].nextu());
+                }
+                let r: [i32; 8] = unsafe {
+                    bytemuck::cast(v.randiv(_mm256_set1_epi32(scale), _mm256_set1_epi32(min)))
+                };
+                for i in 0..8 {
+                    assert_eq!(r[i], s[i].randi(min, max));
+                }
+            }
+        }
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            let mut v = unsafe { Sfc32x16::new(4) };
+            let mut s = lanes(4, 16);
+            for _ in 0..5000 {
+                let got = v.nextu();
+                for i in 0..16 {
+                    assert_eq!(got[i], s[i].nextu());
+                }
+                let r: [i32; 16] = unsafe {
+                    std::mem::transmute(v.randiv(_mm512_set1_epi32(scale), _mm512_set1_epi32(min)))
+                };
+                for i in 0..16 {
+                    assert_eq!(r[i], s[i].randi(min, max));
+                }
+            }
+        }
     }
 
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     fn scalar_lanes(seed: u32) -> [Sfc32; SFC32X4] {
         let mut seedgen = SplitMix32::new(seed);
         std::array::from_fn(|_| Sfc32 {
@@ -385,7 +414,7 @@ mod tests {
         })
     }
 
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     #[test]
     fn sfc32x4_lanes_match_scalar() {
         let mut vector = Sfc32x4::new(0);
@@ -398,7 +427,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     #[test]
     fn sfc32x4_randiv_randfv_match_scalar() {
         let (min_i, max_i) = (-5i32, 7i32);

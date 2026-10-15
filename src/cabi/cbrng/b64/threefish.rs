@@ -13,7 +13,7 @@ pub extern "C" fn threefish256_new(seed: u64) -> *mut Threefish256 {
 /// Frees a `Threefish256` instance previously created by [`threefish256_free`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefish256_free(ptr: *mut Threefish256) {
+pub unsafe extern "C" fn threefish256_free(ptr: *mut Threefish256) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -35,25 +35,25 @@ where
 
 /// Fills `out[0..count]` with raw `u64` random values, producing 4 values per cipher block.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefish256_next_u64s(ptr: *mut Threefish256, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn threefish256_next_u64s(ptr: *mut Threefish256, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         threefish256_fill(rng, buffer, |x| x);
     }
 }
 /// Fills `out[0..count]` with `f64` values in `[0, 1)`, producing 4 values per cipher block.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefish256_next_f64s(ptr: *mut Threefish256, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn threefish256_next_f64s(ptr: *mut Threefish256, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         threefish256_fill(rng, buffer, |x| u2f_01!(f64, 64, x));
     }
 }
 /// Fills `out[0..count]` with `i64` values in `[min, max]`, producing 4 values per cipher block.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefish256_rand_i64s(
+pub unsafe extern "C" fn threefish256_rand_i64s(
     ptr: *mut Threefish256,
     out: *mut i64,
     count: usize,
@@ -61,15 +61,15 @@ pub extern "C" fn threefish256_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let range = (max as i128 - min as i128 + 1) as u128;
         threefish256_fill(rng, buffer, |x| ((x as u128 * range) >> 64) as i64 + min);
     }
 }
 /// Fills `out[0..count]` with `f64` values in `[min, max)`, producing 4 values per cipher block.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefish256_rand_f64s(
+pub unsafe extern "C" fn threefish256_rand_f64s(
     ptr: *mut Threefish256,
     out: *mut f64,
     count: usize,
@@ -77,8 +77,8 @@ pub extern "C" fn threefish256_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let mult = max - min;
         threefish256_fill(rng, buffer, |x| u2f_01!(f64, 64, x) * mult + min);
     }

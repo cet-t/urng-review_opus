@@ -69,10 +69,10 @@ impl Rng for Squares32 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
@@ -205,10 +205,29 @@ mod tests {
 
     crate::safe_test! { Squares32 }
 
-    #[cfg(all(
-        feature = "simd",
-        target_feature = "avx512f",
-        target_feature = "avx512dq"
-    ))]
-    crate::unsafe_test! { Squares32x8 }
+    /// REVIEW B7: replaces an `unsafe_test!` that was gated on compile-time
+    /// `target_feature` and therefore never ran. Lane `i` is the scalar
+    /// Squares32 stream with counter `i, i+8, i+16, ...` and key `k[i]`.
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn squares32x8_lanes_match_scalar() {
+        if !(std::arch::is_x86_feature_detected!("avx512f")
+            && std::arch::is_x86_feature_detected!("avx512dq"))
+        {
+            return;
+        }
+        for seed in [0u32, 1, 0xFFFF_FFFF] {
+            let mut sg = crate::_internal::sm64_from_seed32!(seed);
+            let keys: [u64; 8] = [0; 8].map(|_| sg.nextu_const());
+            assert_eq!(*Squares32::new(seed).k, keys[0], "lane 0 key = scalar key");
+            let mut v = unsafe { Squares32x8::new(seed) };
+            for n in 0..10_000u64 {
+                let got = unsafe { v.nextu() };
+                for i in 0..8 {
+                    let want = Squares32::compute(wrap!(i as u64 + 8 * n), wrap!(keys[i]));
+                    assert_eq!(got[i], *want, "lane {i}, step {n}");
+                }
+            }
+        }
+    }
 }

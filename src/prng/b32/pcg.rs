@@ -50,10 +50,10 @@ impl Rng for Pcg32 {
 
 // --- Pcg32x8 (AVX-512) ---
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
@@ -155,11 +155,11 @@ pub mod simd {
         }
     }
 
-    impl RngV for Pcg32x8 {
-        type Word = __m256i;
-
+    impl Pcg32x8 {
+        #[target_feature(enable = "avx512f")]
         #[inline]
-        fn nextuv(&mut self) -> Self::Word {
+        #[allow(unused_unsafe)]
+        fn step(&mut self) -> __m256i {
             unsafe {
                 let mult_lo = _mm512_set1_epi64(0x4C957F2D_i64);
                 let mult_hi = _mm512_set1_epi64(0x5851F42D_i64);
@@ -168,6 +168,17 @@ pub mod simd {
             }
         }
     }
+    // SAFETY: values are only created by the `avx512f` constructor `new`.
+    unsafe impl RngV for Pcg32x8 {
+        type Word = __m256i;
+
+        #[inline(always)]
+        fn nextuv(&mut self) -> __m256i {
+            // SAFETY: the CPU features are guaranteed by construction.
+            unsafe { self.step() }
+        }
+    }
+
 }
 
 #[cfg(test)]

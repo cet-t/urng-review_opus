@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -17,7 +16,7 @@ pub extern "C" fn threefry32x4_new(seed: u32) -> *mut Threefry32x4 {
 
 /// Frees the memory of a `Threefry32x4` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x4_free(ptr: *mut Threefry32x4) {
+pub unsafe extern "C" fn threefry32x4_free(ptr: *mut Threefry32x4) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -86,10 +85,10 @@ fn fry4_advance(rng: &mut Threefry32x4, count: usize) {
 /// Fills the output buffer with the next random `u32` values.
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x4_next_u32s(ptr: *mut Threefry32x4, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn threefry32x4_next_u32s(ptr: *mut Threefry32x4, out: *mut u32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         fry4_fill(buffer, rng.c, rng.k, rng.tw, |x| *x);
         fry4_advance(rng, count);
     }
@@ -98,10 +97,10 @@ pub extern "C" fn threefry32x4_next_u32s(ptr: *mut Threefry32x4, out: *mut u32, 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x4_next_f32s(ptr: *mut Threefry32x4, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn threefry32x4_next_f32s(ptr: *mut Threefry32x4, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         fry4_fill(buffer, rng.c, rng.k, rng.tw, |x| u2f_01!(f32, 32, *x));
         fry4_advance(rng, count);
     }
@@ -110,7 +109,7 @@ pub extern "C" fn threefry32x4_next_f32s(ptr: *mut Threefry32x4, out: *mut f32, 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x4_rand_i32s(
+pub unsafe extern "C" fn threefry32x4_rand_i32s(
     ptr: *mut Threefry32x4,
     out: *mut i32,
     count: usize,
@@ -118,8 +117,8 @@ pub extern "C" fn threefry32x4_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let range = (max as i64 - min as i64 + 1) as u64;
         fry4_fill(buffer, rng.c, rng.k, rng.tw, |x| {
             *(((x.cast::<u64>() * range) >> 32).cast::<i32>() + min)
@@ -131,7 +130,7 @@ pub extern "C" fn threefry32x4_rand_i32s(
 /// Fills the output buffer with random `f32` values in the range [min, max).
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x4_rand_f32s(
+pub unsafe extern "C" fn threefry32x4_rand_f32s(
     ptr: *mut Threefry32x4,
     out: *mut f32,
     count: usize,
@@ -139,8 +138,8 @@ pub extern "C" fn threefry32x4_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let mult = max - min;
         fry4_fill(buffer, rng.c, rng.k, rng.tw, |x| {
             u2f_01!(f32, 32, *x) * mult + min
@@ -158,7 +157,7 @@ pub extern "C" fn threefry32x2_new(seed: u32) -> *mut Threefry32x2 {
 
 /// Frees the memory of a `Threefry32x2` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x2_free(ptr: *mut Threefry32x2) {
+pub unsafe extern "C" fn threefry32x2_free(ptr: *mut Threefry32x2) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -218,10 +217,10 @@ fn fry2_advance(rng: &mut Threefry32x2, count: usize) {
 /// Fills the output buffer with the next random `u32` values.
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x2_next_u32s(ptr: *mut Threefry32x2, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn threefry32x2_next_u32s(ptr: *mut Threefry32x2, out: *mut u32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         fry2_fill(buffer, rng.c, rng.k, |x| *x);
         fry2_advance(rng, count);
     }
@@ -230,10 +229,10 @@ pub extern "C" fn threefry32x2_next_u32s(ptr: *mut Threefry32x2, out: *mut u32, 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x2_next_f32s(ptr: *mut Threefry32x2, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn threefry32x2_next_f32s(ptr: *mut Threefry32x2, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         fry2_fill(buffer, rng.c, rng.k, |x| u2f_01!(f32, 32, *x));
         fry2_advance(rng, count);
     }
@@ -242,7 +241,7 @@ pub extern "C" fn threefry32x2_next_f32s(ptr: *mut Threefry32x2, out: *mut f32, 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 /// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
-pub extern "C" fn threefry32x2_rand_i32s(
+pub unsafe extern "C" fn threefry32x2_rand_i32s(
     ptr: *mut Threefry32x2,
     out: *mut i32,
     count: usize,
@@ -250,8 +249,8 @@ pub extern "C" fn threefry32x2_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let range = (max as i64 - min as i64 + 1) as u64;
         fry2_fill(buffer, rng.c, rng.k, |x| {
             *((x.cast::<u64>() * range) >> 32).cast::<i32>() + min

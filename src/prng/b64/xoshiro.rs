@@ -1,4 +1,4 @@
-﻿use wrapn::{wrap, wu64};
+use wrapn::{wrap, wu64};
 
 use crate::prng::b64::SplitMix64;
 use crate::rng::Rng;
@@ -103,10 +103,10 @@ impl Rng for Xoshiro256Ss {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;

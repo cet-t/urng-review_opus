@@ -1,4 +1,3 @@
-﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -19,18 +18,18 @@ pub extern "C" fn cet64_new(seed: u64) -> *mut Cet64 {
 /// Frees a `Cet64` instance previously created by [`cet64_free`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn cet64_free(ptr: *mut Cet64) {
+pub unsafe extern "C" fn cet64_free(ptr: *mut Cet64) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 /// Fills `out[0..count]` with raw `u64` random values.
 #[unsafe(no_mangle)]
-pub extern "C" fn cet64_next_u64s(ptr: *mut Cet64, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn cet64_next_u64s(ptr: *mut Cet64, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET64_PAR_CHUNK)
             .enumerate()
@@ -46,11 +45,11 @@ pub extern "C" fn cet64_next_u64s(ptr: *mut Cet64, out: *mut u64, count: usize) 
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[0, 1)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn cet64_next_f64s(ptr: *mut Cet64, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn cet64_next_f64s(ptr: *mut Cet64, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET64_PAR_CHUNK)
             .enumerate()
@@ -66,7 +65,7 @@ pub extern "C" fn cet64_next_f64s(ptr: *mut Cet64, out: *mut f64, count: usize) 
 }
 /// Fills `out[0..count]` with `i64` values uniformly distributed in `[min, max]`.
 #[unsafe(no_mangle)]
-pub extern "C" fn cet64_rand_i64s(
+pub unsafe extern "C" fn cet64_rand_i64s(
     ptr: *mut Cet64,
     out: *mut i64,
     count: usize,
@@ -74,9 +73,9 @@ pub extern "C" fn cet64_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET64_PAR_CHUNK)
             .enumerate()
@@ -92,7 +91,7 @@ pub extern "C" fn cet64_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[min, max)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn cet64_rand_f64s(
+pub unsafe extern "C" fn cet64_rand_f64s(
     ptr: *mut Cet64,
     out: *mut f64,
     count: usize,
@@ -100,9 +99,9 @@ pub extern "C" fn cet64_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET64_PAR_CHUNK)
             .enumerate()
@@ -123,18 +122,18 @@ pub extern "C" fn cet256_new(seed: u64) -> *mut Cet256 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cet256_free(ptr: *mut Cet256) {
+pub unsafe extern "C" fn cet256_free(ptr: *mut Cet256) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cet256_next_u64s(ptr: *mut Cet256, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn cet256_next_u64s(ptr: *mut Cet256, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET256_PAR_CHUNK)
             .enumerate()
@@ -150,11 +149,11 @@ pub extern "C" fn cet256_next_u64s(ptr: *mut Cet256, out: *mut u64, count: usize
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cet256_next_f64s(ptr: *mut Cet256, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn cet256_next_f64s(ptr: *mut Cet256, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET256_PAR_CHUNK)
             .enumerate()
@@ -170,7 +169,7 @@ pub extern "C" fn cet256_next_f64s(ptr: *mut Cet256, out: *mut f64, count: usize
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cet256_rand_i64s(
+pub unsafe extern "C" fn cet256_rand_i64s(
     ptr: *mut Cet256,
     out: *mut i64,
     count: usize,
@@ -178,9 +177,9 @@ pub extern "C" fn cet256_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET256_PAR_CHUNK)
             .enumerate()
@@ -196,7 +195,7 @@ pub extern "C" fn cet256_rand_i64s(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn cet256_rand_f64s(
+pub unsafe extern "C" fn cet256_rand_f64s(
     ptr: *mut Cet256,
     out: *mut f64,
     count: usize,
@@ -204,9 +203,9 @@ pub extern "C" fn cet256_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         buffer
             .par_chunks_mut(CET256_PAR_CHUNK)
             .enumerate()
@@ -221,16 +220,16 @@ pub extern "C" fn cet256_rand_f64s(
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use super::{STRIDE, SplitMix64};
     use crate::prng::b64::{Cet64x8, Cet256x2};
     use rayon::prelude::*;
     use std::arch::x86_64::*;
-    use std::slice::from_raw_parts_mut;
+    
 
     const CET_SP1: u64 = 0xFFFFFFFFFFFFFF43;
     const CET_P1: u64 = 0x94D049BB133111EB;
@@ -252,11 +251,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn cet64x8_new(seed: u64) -> *mut Cet64x8 {
-        Box::into_raw(Box::new(Cet64x8::new(seed)))
+        if !(std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512dq")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
+        unsafe { Box::into_raw(Box::new(Cet64x8::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn cet64x8_free(ptr: *mut Cet64x8) {
+    pub unsafe extern "C" fn cet64x8_free(ptr: *mut Cet64x8) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -409,18 +412,22 @@ mod simd {
                 *v = tmp[i];
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn cet64x8_next_u64s(ptr: *mut Cet64x8, out: *mut u64, count: usize) {
+    pub unsafe extern "C" fn cet64x8_next_u64s(ptr: *mut Cet64x8, out: *mut u64, count: usize) {
         if count == 0 {
             return;
         }
 
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let seed = rng.nextu().iter().copied().fold(0u64, u64::wrapping_add);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(CET64X8_PAR_CHUNK)
@@ -442,11 +449,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn cet256x2_new(seed: u64) -> *mut Cet256x2 {
-        Box::into_raw(Box::new(Cet256x2::new(seed)))
+        if !(std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512dq")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
+        unsafe { Box::into_raw(Box::new(Cet256x2::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn cet256x2_free(ptr: *mut Cet256x2) {
+    pub unsafe extern "C" fn cet256x2_free(ptr: *mut Cet256x2) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -474,16 +485,16 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn cet256x2_next_u64s(ptr: *mut Cet256x2, out: *mut u64, count: usize) {
+    pub unsafe extern "C" fn cet256x2_next_u64s(ptr: *mut Cet256x2, out: *mut u64, count: usize) {
         if count == 0 {
             return;
         }
 
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let seed_pair = rng.nextu();
             let seed = seed_pair[0].wrapping_add(seed_pair[1]);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(CET256X2_PAR_CHUNK)

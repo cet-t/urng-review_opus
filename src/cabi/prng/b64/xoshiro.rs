@@ -1,4 +1,3 @@
-﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -14,7 +13,7 @@ pub extern "C" fn xoshiro256pp_new(seed: u64) -> *mut Xoshiro256Pp {
 /// Frees a `Xoshiro256Pp` instance previously created by [`xoshiro256pp_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256pp_free(ptr: *mut Xoshiro256Pp) {
+pub unsafe extern "C" fn xoshiro256pp_free(ptr: *mut Xoshiro256Pp) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -24,10 +23,10 @@ const XOSHIRO256PP_PAR_CHUNK: usize = 4096;
 
 /// Fills `out[0..count]` with raw `u64` random values using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256pp_next_u64s(ptr: *mut Xoshiro256Pp, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn xoshiro256pp_next_u64s(ptr: *mut Xoshiro256Pp, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -46,10 +45,10 @@ pub extern "C" fn xoshiro256pp_next_u64s(ptr: *mut Xoshiro256Pp, out: *mut u64, 
 }
 /// Fills `out[0..count]` with `f64` values in `[0, 1)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256pp_next_f64s(ptr: *mut Xoshiro256Pp, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn xoshiro256pp_next_f64s(ptr: *mut Xoshiro256Pp, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -68,7 +67,7 @@ pub extern "C" fn xoshiro256pp_next_f64s(ptr: *mut Xoshiro256Pp, out: *mut f64, 
 }
 /// Fills `out[0..count]` with `i64` values in `[min, max]` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256pp_rand_i64s(
+pub unsafe extern "C" fn xoshiro256pp_rand_i64s(
     ptr: *mut Xoshiro256Pp,
     out: *mut i64,
     count: usize,
@@ -76,8 +75,8 @@ pub extern "C" fn xoshiro256pp_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -96,7 +95,7 @@ pub extern "C" fn xoshiro256pp_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values in `[min, max)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256pp_rand_f64s(
+pub unsafe extern "C" fn xoshiro256pp_rand_f64s(
     ptr: *mut Xoshiro256Pp,
     out: *mut f64,
     count: usize,
@@ -104,8 +103,8 @@ pub extern "C" fn xoshiro256pp_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -139,7 +138,7 @@ mod simd {
     /// Frees a `Xoshiro256Ssx2` instance previously created by [`xoshiro256ssx2_new`].
     /// Does nothing if `ptr` is null.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro256ssx2_free(ptr: *mut Xoshiro256Ssx2) {
+    pub unsafe extern "C" fn xoshiro256ssx2_free(ptr: *mut Xoshiro256Ssx2) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -152,7 +151,7 @@ mod simd {
     /// (most of the output was duplicated); this one is sequential and therefore
     /// single-threaded.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro256ssx2_next_u64s(
+    pub unsafe extern "C" fn xoshiro256ssx2_next_u64s(
         ptr: *mut Xoshiro256Ssx2,
         out: *mut u64,
         count: usize,
@@ -161,7 +160,7 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let buffer = std::slice::from_raw_parts_mut(out, count);
             let mut pairs = buffer.chunks_exact_mut(2);
             for dst in pairs.by_ref() {
@@ -183,7 +182,7 @@ pub extern "C" fn xoshiro256ss_new(seed: u64) -> *mut Xoshiro256Ss {
 /// Frees a `Xoshiro256Ss` instance previously created by [`xoshiro256ss_free`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256ss_free(ptr: *mut Xoshiro256Ss) {
+pub unsafe extern "C" fn xoshiro256ss_free(ptr: *mut Xoshiro256Ss) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -193,10 +192,10 @@ const XOSHIRO256SS_PAR_CHUNK: usize = 4096;
 
 /// Fills `out[0..count]` with raw `u64` random values using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256ss_next_u64s(ptr: *mut Xoshiro256Ss, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn xoshiro256ss_next_u64s(ptr: *mut Xoshiro256Ss, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -215,10 +214,10 @@ pub extern "C" fn xoshiro256ss_next_u64s(ptr: *mut Xoshiro256Ss, out: *mut u64, 
 }
 /// Fills `out[0..count]` with `f64` values in `[0, 1)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256ss_next_f64s(ptr: *mut Xoshiro256Ss, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn xoshiro256ss_next_f64s(ptr: *mut Xoshiro256Ss, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -237,7 +236,7 @@ pub extern "C" fn xoshiro256ss_next_f64s(ptr: *mut Xoshiro256Ss, out: *mut f64, 
 }
 /// Fills `out[0..count]` with `i64` values in `[min, max]` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256ss_rand_i64s(
+pub unsafe extern "C" fn xoshiro256ss_rand_i64s(
     ptr: *mut Xoshiro256Ss,
     out: *mut i64,
     count: usize,
@@ -245,8 +244,8 @@ pub extern "C" fn xoshiro256ss_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer
@@ -265,7 +264,7 @@ pub extern "C" fn xoshiro256ss_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values in `[min, max)` using parallel chunk generation.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro256ss_rand_f64s(
+pub unsafe extern "C" fn xoshiro256ss_rand_f64s(
     ptr: *mut Xoshiro256Ss,
     out: *mut f64,
     count: usize,
@@ -273,8 +272,8 @@ pub extern "C" fn xoshiro256ss_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let base_seed = rng.nextu();
 
         buffer

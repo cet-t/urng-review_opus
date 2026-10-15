@@ -16,21 +16,21 @@ pub(crate) mod xorshift;
 pub(crate) mod xoshiro;
 
 pub use biski::Biski64;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use biski::Biski64x8;
 pub use cet::{Cet64, Cet256};
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use cet::{Cet64x8, Cet256x2};
 pub use mersenne::{Mt1993764, Sfmt1993764};
 pub use sfc::Sfc64;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use sfc::Sfc64x8;
 pub use splitmix::SplitMix64;
 pub use twisted_gfsr::TwistedGFSR;
 pub use wyhash::WyHash64;
 pub use xoroshiro::{Xoroshiro128Pp, Xoroshiro128Ss};
 pub use xorshift::Xorshift64;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use xoshiro::Xoshiro256Ssx2;
 pub use xoshiro::{Xoshiro256Pp, Xoshiro256Ss};
 

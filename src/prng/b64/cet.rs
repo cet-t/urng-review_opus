@@ -106,10 +106,10 @@ impl Rng for Cet256 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
@@ -128,6 +128,7 @@ pub mod simd {
     #[cfg(target_arch = "x86_64")]
     impl Cet64x8 {
         /// Creates a new `Cet64x8` from 8 independent seeds.
+        #[target_feature(enable = "avx512f,avx512dq")]
         pub fn new(seed: u64) -> Self {
             let mut seedgen = SplitMix64::new(seed);
             let s = [0u64; 8].map(|_| seedgen.nextu_const());
@@ -196,12 +197,7 @@ pub mod simd {
         #[target_feature(enable = "avx512f,avx512dq")]
         pub unsafe fn randi(&mut self, min: i64, max: i64) -> [i64; 8] {
             let u = unsafe { self.nextu() };
-            let range = (max as i128 - min as i128 + 1) as u128;
-            let mut out = [0i64; 8];
-            for i in 0..8 {
-                out[i] = ((u[i] as u128 * range) >> 64) as i64 + min;
-            }
-            out
+            u.map(|w| crate::rng::Word::to_randi(w, min, max))
         }
 
         ///
@@ -211,12 +207,7 @@ pub mod simd {
         #[target_feature(enable = "avx512f,avx512dq")]
         pub unsafe fn randf(&mut self, min: f64, max: f64) -> [f64; 8] {
             let u = unsafe { self.nextu() };
-            let range = max - min;
-            let mut out = [0f64; 8];
-            for i in 0..8 {
-                out[i] = u2f_01!(f64, 64, u[i]) * range + min;
-            }
-            out
+            u.map(|w| crate::rng::Word::to_randf(w, min, max))
         }
     }
 
@@ -232,6 +223,7 @@ pub mod simd {
     #[cfg(target_arch = "x86_64")]
     impl Cet256x2 {
         /// Creates a new `Cet256x2` from 2 independent seeds.
+        #[target_feature(enable = "avx512f,avx512dq")]
         pub fn new(seed: u64) -> Self {
             let mut seedgen = SplitMix64::new(seed);
             let mut s = [0u64; 8];
@@ -302,11 +294,7 @@ pub mod simd {
         #[target_feature(enable = "avx512f,avx512dq")]
         pub unsafe fn randi(&mut self, min: i64, max: i64) -> [i64; 2] {
             let u = unsafe { self.nextu() };
-            let range = (max as i128 - min as i128 + 1) as u128;
-            [
-                ((u[0] as u128 * range) >> 64) as i64 + min,
-                ((u[1] as u128 * range) >> 64) as i64 + min,
-            ]
+            u.map(|w| crate::rng::Word::to_randi(w, min, max))
         }
 
         ///
@@ -316,11 +304,7 @@ pub mod simd {
         #[target_feature(enable = "avx512f,avx512dq")]
         pub unsafe fn randf(&mut self, min: f64, max: f64) -> [f64; 2] {
             let u = unsafe { self.nextu() };
-            let range = max - min;
-            [
-                u2f_01!(f64, 64, u[0]) * range + min,
-                u2f_01!(f64, 64, u[1]) * range + min,
-            ]
+            u.map(|w| crate::rng::Word::to_randf(w, min, max))
         }
     }
 }
@@ -334,13 +318,68 @@ mod tests {
         Cet256
     }
 
-    #[cfg(all(
-        feature = "simd",
-        target_feature = "avx512f",
-        target_feature = "avx512dq"
-    ))]
-    crate::unsafe_test! {
-        Cet64x8,
-        Cet256x2
+    /// Independent check of the scalar mixer: SP2 is -229 mod 2^64, which the
+    /// SIMD path computes with shifts.
+    #[test]
+    fn cet64_matches_independent_formula() {
+        let mut g = Cet64::new(3);
+        let mut s = *g.s;
+        for _ in 0..10_000 {
+            s = s.wrapping_add(SP1);
+            let mut x = s;
+            x ^= x >> 30;
+            x = x.wrapping_mul(229u64.wrapping_neg());
+            x ^= x >> 27;
+            x = x.wrapping_mul(P1);
+            x ^= x >> 31;
+            assert_eq!(g.nextu(), x);
+        }
+    }
+
+    /// REVIEW B7: the previous `unsafe_test!` was gated on compile-time
+    /// `target_feature`, so it never ran (it did not even type-check: these
+    /// types have no `nextuv`). Every lane is now compared with the scalar
+    /// generator under runtime detection.
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn cet_simd_lanes_match_scalar() {
+        if !(std::arch::is_x86_feature_detected!("avx512f")
+            && std::arch::is_x86_feature_detected!("avx512dq"))
+        {
+            return;
+        }
+        for seed in [0u64, 1, 0xDEAD_BEEF, u64::MAX] {
+            let mut sg = SplitMix64::new(seed);
+            let mut lanes: Vec<Cet64> = (0..8).map(|_| Cet64 { s: wrap!(sg.nextu_const()) }).collect();
+            assert_eq!(*lanes[0].s, *Cet64::new(seed).s);
+            let mut v = unsafe { Cet64x8::new(seed) };
+            for _ in 0..10_000 {
+                let got = unsafe { v.nextu() };
+                for (i, l) in lanes.iter_mut().enumerate() {
+                    assert_eq!(got[i], l.nextu(), "Cet64x8 lane {i}");
+                }
+            }
+
+            let mut sg = SplitMix64::new(seed);
+            let st: [u64; 8] = [0; 8].map(|_| sg.nextu_const());
+            let mut l0 = Cet256 { s: wrap![st[0], st[1], st[2], st[3]] };
+            let mut l1 = Cet256 { s: wrap![st[4], st[5], st[6], st[7]] };
+            let mut v = unsafe { Cet256x2::new(seed) };
+            for _ in 0..10_000 {
+                assert_eq!(unsafe { v.nextu() }, [l0.nextu(), l1.nextu()]);
+            }
+            // the carry chain must also agree across a forced s0 wrap-around
+            let mut c = Cet256 { s: wrap![u64::MAX - SP1 + 1, u64::MAX, u64::MAX, 7] };
+            let _ = c.nextu();
+            assert_eq!(c.s.map(|w| *w), [0, 0, 0, 8]);
+        }
+        // ranged draws stay in range, including the full i64 range
+        let mut v = unsafe { Cet64x8::new(1) };
+        for _ in 0..1000 {
+            let r = unsafe { v.randi(i64::MIN, i64::MAX) };
+            let _ = r;
+            assert!(unsafe { v.randi(-3, 3) }.iter().all(|x| (-3..=3).contains(x)));
+            assert!(unsafe { v.randf(1e15, 1e15 + 1.0) }.iter().all(|x| *x < 1e15 + 1.0));
+        }
     }
 }

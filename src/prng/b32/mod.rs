@@ -15,35 +15,35 @@ pub(crate) mod xorwow;
 pub(crate) mod xoshiro;
 
 pub use jsf::Jsf32;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use jsf::{Jsf32x8, Jsf32x16};
 pub use mersenne::{
     Mt19937, Sfmt607, Sfmt1279, Sfmt2281, Sfmt4253, Sfmt11213, Sfmt19937, Sfmt44497, Sfmt86243,
     Sfmt132049, Sfmt216091,
 };
 pub use pcg::Pcg32;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use pcg::Pcg32x8;
 pub use sfc::Sfc32;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use sfc::{Sfc32x4, Sfc32x8, Sfc32x16};
 pub use splitmix::SplitMix32;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use splitmix::SplitMix32x16;
 pub use xoroshiro::Xoroshiro64Ss;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use xoroshiro::{Xoroshiro64Ssx8, Xoroshiro64Ssx16};
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use xorshift::Xorshift32x8;
 pub use xorshift::{Xorshift32, Xorshift128};
 pub use xorwow::Xorwow;
 pub use xoshiro::{Xoshiro128Pp, Xoshiro128Ss};
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use xoshiro::{Xoshiro128Ppx16, Xoshiro128Ssx16};
 
-#[cfg(all(feature = "cabi", feature = "simd"))]
+#[cfg(all(feature = "cabi", feature = "simd", target_arch = "x86_64"))]
 pub(crate) use pcg::{PCG32_MULT, PCG32X8_LANE, PCG32X8_PAR_CHUNK, PCG32X8_PAR_CHUNK_BLOCKS};
-#[cfg(all(feature = "cabi", feature = "simd"))]
+#[cfg(all(feature = "cabi", feature = "simd", target_arch = "x86_64"))]
 pub(crate) use splitmix::{SPLITMIX32_GAMMA, SPLITMIX32X16, SPLITMIX32X16_PAR_CHUNK};
 
 crate::impl_default_from_seed32!(

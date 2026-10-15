@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -15,7 +14,7 @@ pub extern "C" fn sfc64_new(seed: u64) -> *mut Sfc64 {
 /// Frees a `Sfc64` instance previously created by [`sfc64_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc64_free(ptr: *mut Sfc64) {
+pub unsafe extern "C" fn sfc64_free(ptr: *mut Sfc64) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -24,10 +23,10 @@ pub extern "C" fn sfc64_free(ptr: *mut Sfc64) {
 const SFC64_PAR_CHUNK: usize = 0x10000;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc64_next_u64s(ptr: *mut Sfc64, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn sfc64_next_u64s(ptr: *mut Sfc64, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -46,10 +45,10 @@ pub extern "C" fn sfc64_next_u64s(ptr: *mut Sfc64, out: *mut u64, count: usize) 
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc64_next_f64s(ptr: *mut Sfc64, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn sfc64_next_f64s(ptr: *mut Sfc64, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -68,7 +67,7 @@ pub extern "C" fn sfc64_next_f64s(ptr: *mut Sfc64, out: *mut f64, count: usize) 
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc64_rand_i64s(
+pub unsafe extern "C" fn sfc64_rand_i64s(
     ptr: *mut Sfc64,
     out: *mut i64,
     count: usize,
@@ -76,8 +75,8 @@ pub extern "C" fn sfc64_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -96,7 +95,7 @@ pub extern "C" fn sfc64_rand_i64s(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc64_rand_f64s(
+pub unsafe extern "C" fn sfc64_rand_f64s(
     ptr: *mut Sfc64,
     out: *mut f64,
     count: usize,
@@ -104,8 +103,8 @@ pub extern "C" fn sfc64_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -123,10 +122,10 @@ pub extern "C" fn sfc64_rand_f64s(
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use super::*;
     use crate::prng::b64::Sfc64x8;
@@ -134,11 +133,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn sfc64x8_new(seed: u64) -> *mut Sfc64x8 {
-        Box::into_raw(Box::new(Sfc64x8::new(seed)))
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
+        unsafe { Box::into_raw(Box::new(Sfc64x8::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc64x8_free(ptr: *mut Sfc64x8) {
+    pub unsafe extern "C" fn sfc64x8_free(ptr: *mut Sfc64x8) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -274,19 +277,23 @@ mod simd {
                 *v = tmp[j];
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc64x8_next_u64s(ptr: *mut Sfc64x8, out: *mut u64, count: usize) {
+    pub unsafe extern "C" fn sfc64x8_next_u64s(ptr: *mut Sfc64x8, out: *mut u64, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let vals = rng.nextu();
             let seed = vals.iter().copied().fold(0, u64::wrapping_add);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC64X8_PAR_CHUNK)
                 .enumerate()

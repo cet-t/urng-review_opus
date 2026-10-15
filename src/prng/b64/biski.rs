@@ -48,23 +48,24 @@ impl Rng for Biski64 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
     use crate::_internal::{i2f_bits, u2f_01};
     use crate::SplitMix64;
 
-    /// A 4-way SIMD Biski64 generator using AVX512 512-bit intrinsics.
+    /// An 8-way SIMD Biski64 generator using AVX-512F (lane i = scalar Biski64).
     ///
     /// # Example
     /// ```no_run
     /// use urng::Biski64x8;
     ///
-    /// let mut rng = Biski64x8::new(0);
+    /// if !std::arch::is_x86_feature_detected!("avx512f") { return; }
+    /// let mut rng = unsafe { Biski64x8::new(0) };
     /// let _ = unsafe { rng.nextu() };
     /// ```
     #[cfg(all(feature = "simd", target_arch = "x86_64"))]
@@ -75,7 +76,7 @@ pub mod simd {
         loop_mix: __m512i,
     }
 
-    #[cfg(feature = "simd")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     pub(crate) const INC: u64 = 0x9999999999999999;
 
     #[cfg(all(feature = "simd", target_arch = "x86_64"))]
@@ -83,8 +84,10 @@ pub mod simd {
         /// Creates a new `Biski64x8` from 8 independent seeds.
         ///
         /// # Safety
-        /// Requires AVX512 support (guaranteed by `target-cpu=native` on modern x86_64).
-        #[inline(always)]
+        /// The CPU must support AVX-512F (this is a `#[target_feature]` constructor,
+        /// so calling it from ordinary code requires `unsafe`).
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub fn new(seed: u64) -> Self {
             let mut sg = SplitMix64::new(seed);
             let mut fast_loop = [0u64; 8];
@@ -104,12 +107,12 @@ pub mod simd {
             }
         }
 
-        /// Generates 4 random `u64` values simultaneously and writes them to `out`.
+        /// Generates 8 random `u64` values (one per lane).
         ///
         /// # Safety
-        /// `out` must point to a valid buffer of at least 8 `u64` values.
-        /// Requires AVX512 support.
-        #[inline(always)]
+                /// Requires AVX512 support.
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn nextu(&mut self) -> [u64; 8] {
             unsafe {
                 // let output = self.mix.wrapping_add(self.loop_mix);
@@ -139,7 +142,8 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn nextf(&mut self) -> [f64; 8] {
             unsafe {
                 let u = self.nextu();
@@ -156,16 +160,12 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn randi(&mut self, min: i64, max: i64) -> [i64; 8] {
             unsafe {
                 let u = self.nextu();
-                let range = (max as i128 - min as i128 + 1) as u128;
-                let mut out = [0i64; 8];
-                for i in 0..8 {
-                    out[i] = ((u[i] as u128 * range) >> 64) as i64 + min;
-                }
-                out
+                u.map(|w| crate::rng::Word::to_randi(w, min, max))
             }
         }
 
@@ -174,16 +174,12 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn randf(&mut self, min: f64, max: f64) -> [f64; 8] {
             unsafe {
                 let u = self.nextu();
-                let range = max - min;
-                let mut out = [0f64; 8];
-                for i in 0..8 {
-                    out[i] = u2f_01!(f64, 64, u[i]) * range + min;
-                }
-                out
+                u.map(|w| crate::rng::Word::to_randf(w, min, max))
             }
         }
     }
@@ -211,7 +207,7 @@ mod tests {
                 loop_mix: wrap!(sg.nextu_const()),
             })
             .collect();
-        let mut v = Biski64x8::new(99);
+        let mut v = unsafe { Biski64x8::new(99) };
         for _ in 0..10_000 {
             let got = unsafe { v.nextu() };
             for (i, l) in lanes.iter_mut().enumerate() {

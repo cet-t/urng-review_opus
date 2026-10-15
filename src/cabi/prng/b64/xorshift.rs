@@ -10,30 +10,30 @@ pub extern "C" fn xorshift64_new(seed: u64) -> *mut Xorshift64 {
 /// Frees a `Xorshift64` instance previously created by [`xorshift64_new`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn xorshift64_free(ptr: *mut Xorshift64) {
+pub unsafe extern "C" fn xorshift64_free(ptr: *mut Xorshift64) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 /// Fills `out[0..count]` with raw `u64` random values.
 #[unsafe(no_mangle)]
-pub extern "C" fn xorshift64_next_u64s(ptr: *mut Xorshift64, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn xorshift64_next_u64s(ptr: *mut Xorshift64, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.nextu());
     }
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[0, 1)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn xorshift64_next_f64s(ptr: *mut Xorshift64, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn xorshift64_next_f64s(ptr: *mut Xorshift64, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.nextf());
     }
 }
 /// Fills `out[0..count]` with `i64` values uniformly distributed in `[min, max]`.
 #[unsafe(no_mangle)]
-pub extern "C" fn xorshift64_rand_i64s(
+pub unsafe extern "C" fn xorshift64_rand_i64s(
     ptr: *mut Xorshift64,
     out: *mut i64,
     count: usize,
@@ -41,13 +41,13 @@ pub extern "C" fn xorshift64_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.randi(min, max));
     }
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[min, max)`.
 #[unsafe(no_mangle)]
-pub extern "C" fn xorshift64_rand_f64s(
+pub unsafe extern "C" fn xorshift64_rand_f64s(
     ptr: *mut Xorshift64,
     out: *mut f64,
     count: usize,
@@ -55,7 +55,7 @@ pub extern "C" fn xorshift64_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         crate::_internal::fill_with(out, count, || rng.randf(min, max));
     }
 }

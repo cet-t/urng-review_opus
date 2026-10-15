@@ -56,10 +56,10 @@ impl Rng for SplitMix32 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
@@ -136,10 +136,11 @@ pub mod simd {
     }
 
     #[cfg(target_arch = "x86_64")]
-    impl RngV for SplitMix32x16 {
-        type Word = __m512i;
-
-        fn nextuv(&mut self) -> Self::Word {
+    impl SplitMix32x16 {
+        #[target_feature(enable = "avx512f")]
+        #[inline]
+        #[allow(unused_unsafe)]
+        fn step(&mut self) -> __m512i {
             unsafe {
                 let v = Self::compute(self.state);
                 self.state = _mm512_add_epi32(
@@ -150,6 +151,17 @@ pub mod simd {
             }
         }
     }
+    // SAFETY: values are only created by the `avx512f` constructor `new`.
+    unsafe impl RngV for SplitMix32x16 {
+        type Word = __m512i;
+
+        #[inline(always)]
+        fn nextuv(&mut self) -> __m512i {
+            // SAFETY: the CPU features are guaranteed by construction.
+            unsafe { self.step() }
+        }
+    }
+
 }
 
 #[cfg(test)]

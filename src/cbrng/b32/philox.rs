@@ -1,9 +1,9 @@
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use std::arch::x86_64::*;
 
 use wrapn::{wrap, wu32, wusize};
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 use crate::_internal::{i2f_bits, u2f_01};
 use crate::prng::b32::SplitMix32;
 use crate::rng::Rng;
@@ -140,19 +140,19 @@ crate::_internal::impl_ring_rng32!(Philox32, 4, next_raw);
 
 // --- Philox32x4-10 x4 ---
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[allow(non_upper_case_globals)]
 pub const PHILOX32x16: usize = 16;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[allow(non_upper_case_globals)]
 pub const PHILOX32x4x4_PAR_CHUNK: usize = 131_072;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[allow(non_upper_case_globals)]
 pub const PHILOX32x4x4_CHUNK_RATIO: u128 = (PHILOX32x4x4_PAR_CHUNK / PHILOX32x16) as u128;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[allow(non_upper_case_globals)]
 pub const PHILOX32x4x4_SHIFT: u128 = PHILOX32x4x4_CHUNK_RATIO.trailing_zeros() as u128;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 #[allow(non_upper_case_globals)]
 pub const PHILOX32x16_SHIFT: usize = PHILOX32x16.trailing_zeros() as usize;
 

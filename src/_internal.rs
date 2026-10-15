@@ -207,6 +207,24 @@ pub(crate) fn default_seed32() -> u32 {
     (z ^ (z >> 32)) as u32
 }
 
+/// Turns a C output buffer into a slice. `(NULL, 0)` and any `count == 0` are
+/// accepted and yield `None` (`slice::from_raw_parts_mut` requires a non-null
+/// pointer even for empty slices, so passing them through was UB).
+///
+/// # Safety
+///
+/// If `count > 0`, `out` must be valid for writes of `count` elements, aligned,
+/// and not aliased for the returned lifetime. A null `out` with `count > 0` also
+/// yields `None`.
+#[inline(always)]
+pub(crate) unsafe fn out_slice<'a, T>(out: *mut T, count: usize) -> Option<&'a mut [T]> {
+    if out.is_null() || count == 0 {
+        None
+    } else {
+        Some(unsafe { std::slice::from_raw_parts_mut(out, count) })
+    }
+}
+
 /// Fills `out[..count]` from repeated calls to `next`.
 ///
 /// # Safety
@@ -214,7 +232,9 @@ pub(crate) fn default_seed32() -> u32 {
 /// `out` must be valid for writes of `count` elements.
 #[inline(always)]
 pub(crate) unsafe fn fill_with<T, F: FnMut() -> T>(out: *mut T, count: usize, mut next: F) {
-    let buffer = unsafe { std::slice::from_raw_parts_mut(out, count) };
+    let Some(buffer) = (unsafe { out_slice(out, count) }) else {
+        return;
+    };
     for v in buffer {
         *v = next();
     }
@@ -504,7 +524,7 @@ mod tests {
 /// Two forms:
 /// - `dispatch_simd!(RetType, fallback_fn, avx512_fn, seed)` — allocate and return a raw pointer.
 /// - `dispatch_simd!(Avx512T, FallbackT, fallback_fn, avx512_fn, ptr [, args])` — operate in-place.
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 macro_rules! dispatch_simd {
     ($ret_type:ty, $fallback_fn:ident, $avx512_fn:ident, $seed:expr) => {{
         #[cfg(target_arch = "x86_64")]
@@ -522,7 +542,7 @@ macro_rules! dispatch_simd {
         $fallback_fn($ptr as *mut $fallback_type $(, $arg)*);
     }};
 }
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub(crate) use dispatch_simd;
 
 macro_rules! safe_test {

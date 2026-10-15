@@ -97,10 +97,10 @@ impl Rng for Xorshift128 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
@@ -108,41 +108,63 @@ pub mod simd {
 
     const XORSHIFT32X8: usize = 8;
 
+    /// 8-way Xorshift32 (AVX2). Lane `i` is the scalar [`crate::Xorshift32`]
+    /// seeded with SplitMix32 output `i`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use urng::{RngV, Xorshift32x8};
+    ///
+    /// if std::arch::is_x86_feature_detected!("avx2") {
+    ///     let mut rng = unsafe { Xorshift32x8::new(1) };
+    ///     let _ = rng.nextuv();
+    /// }
+    /// ```
     #[repr(C, align(64))]
     pub struct Xorshift32x8 {
         a: __m256i,
     }
 
     impl Xorshift32x8 {
+        /// Creates a new generator.
+        ///
+        /// # Safety
+        ///
+        /// The CPU must support AVX2. (This constructor used to be a plain safe
+        /// `fn` that executed AVX2/AVX-512VL instructions without any check.)
+        #[target_feature(enable = "avx2")]
         pub fn new(seed: u32) -> Self {
             let mut sm = SplitMix32::new(seed);
-
             let mut a = [0u32; XORSHIFT32X8];
-            for i in 0..XORSHIFT32X8 {
-                a[i] = sm.nextu_const();
-            }
-
-            unsafe {
-                Self {
-                    a: _mm256_loadu_epi32(a.as_ptr() as _),
+            for v in a.iter_mut() {
+                *v = sm.nextu_const();
+                if *v == 0 {
+                    *v = 0x6C07_8965; // xorshift's all-zero state is a fixed point
                 }
             }
+            Self { a: unsafe { _mm256_loadu_si256(a.as_ptr() as *const __m256i) } }
+        }
+
+        #[target_feature(enable = "avx2")]
+        #[inline]
+        fn step(&mut self) -> __m256i {
+            let x = self.a;
+            let x = _mm256_xor_si256(x, _mm256_slli_epi32::<13>(x));
+            let x = _mm256_xor_si256(x, _mm256_srli_epi32::<17>(x));
+            let x = _mm256_xor_si256(x, _mm256_slli_epi32::<5>(x));
+            self.a = x;
+            x
         }
     }
 
-    impl RngV for Xorshift32x8 {
+    // SAFETY: values are only created by `new` (AVX2).
+    unsafe impl RngV for Xorshift32x8 {
         type Word = __m256i;
 
-        #[inline]
+        #[inline(always)]
         fn nextuv(&mut self) -> Self::Word {
-            unsafe {
-                let x = self.a;
-
-                self.a = _mm256_xor_si256(x, _mm256_slli_epi32::<13>(x));
-                self.a = _mm256_xor_si256(self.a, _mm256_srli_epi32::<17>(self.a));
-                self.a = _mm256_xor_si256(self.a, _mm256_slli_epi32::<5>(self.a));
-            }
-            self.a
+            // SAFETY: AVX2 guaranteed by construction.
+            unsafe { self.step() }
         }
     }
 }
@@ -154,5 +176,32 @@ mod tests {
     crate::safe_test! {
         Xorshift32,
         Xorshift128
+    }
+
+    #[test]
+    fn xorshift128_matches_reference() {
+        let mut g = Xorshift128::new(3);
+        let mut st = g.x.map(|w| *w);
+        for _ in 0..100_000 {
+            assert_eq!(g.nextu(), crate::_reftest::xorshift128(&mut st));
+        }
+    }
+
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn xorshift32x8_lanes_match_scalar() {
+        use crate::RngV;
+        if !std::arch::is_x86_feature_detected!("avx2") {
+            return;
+        }
+        let mut sg = SplitMix32::new(9);
+        let mut lanes: Vec<Xorshift32> = (0..8).map(|_| Xorshift32 { a: wrap!(sg.nextu_const()) }).collect();
+        let mut v = unsafe { Xorshift32x8::new(9) };
+        for _ in 0..10_000 {
+            let got: [u32; 8] = bytemuck::cast(v.nextuv());
+            for i in 0..8 {
+                assert_eq!(got[i], lanes[i].nextu());
+            }
+        }
     }
 }

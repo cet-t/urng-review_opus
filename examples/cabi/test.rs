@@ -225,8 +225,8 @@ macro_rules! bench32 {
     ($buf:ident, $results:ident, $name:ident) => {
         pastey::paste! {
             let ptr = [<$name _new>](0);
-            let gs = measure(&mut $buf, |p, n| [<$name _next_u32s>](ptr, p, n));
-            [<$name _free>](ptr);
+            let gs = measure(&mut $buf, |p, n| unsafe { [<$name _next_u32s>](ptr, p, n) });
+            unsafe { [<$name _free>](ptr) };
             $results.push((stringify!($name), gs));
         }
     };
@@ -239,8 +239,8 @@ macro_rules! bench64 {
     ($buf:ident, $results:ident, $name:ident) => {
         pastey::paste! {
             let ptr = [<$name _new>](0);
-            let gs = measure64(&mut $buf, |p, n| [<$name _next_u64s>](ptr, p, n));
-            [<$name _free>](ptr);
+            let gs = measure64(&mut $buf, |p, n| unsafe { [<$name _next_u64s>](ptr, p, n) });
+            unsafe { [<$name _free>](ptr) };
             $results.push((stringify!($name), gs));
         }
     };
@@ -253,8 +253,8 @@ macro_rules! bench32_l3 {
     ($buf:ident, $results:ident, $($name:ident),+ $(,)?) => {
         $(pastey::paste! {
             let ptr = [<$name _new>](0);
-            let gs = measure_l3(&mut $buf, N_L3_32, L3_LOOPS_32, |p, n| [<$name _next_u32s>](ptr, p, n));
-            [<$name _free>](ptr);
+            let gs = measure_l3(&mut $buf, N_L3_32, L3_LOOPS_32, |p, n| unsafe { [<$name _next_u32s>](ptr, p, n) });
+            unsafe { [<$name _free>](ptr) };
             $results.push((stringify!($name), gs));
         })+
     };
@@ -264,8 +264,8 @@ macro_rules! bench64_l3 {
     ($buf:ident, $results:ident, $($name:ident),+ $(,)?) => {
         $(pastey::paste! {
             let ptr = [<$name _new>](0);
-            let gs = measure_l3(&mut $buf, N_L3_64, L3_LOOPS_64, |p, n| [<$name _next_u64s>](ptr, p, n));
-            [<$name _free>](ptr);
+            let gs = measure_l3(&mut $buf, N_L3_64, L3_LOOPS_64, |p, n| unsafe { [<$name _next_u64s>](ptr, p, n) });
+            unsafe { [<$name _free>](ptr) };
             $results.push((stringify!($name), gs));
         })+
     };
@@ -285,8 +285,8 @@ fn main() {
     // Warm: write to every cache line so pages are mapped before measurement.
     {
         let ptr = jsf32x16_new(0);
-        jsf32x16_next_u32s(ptr, buf32.as_mut_ptr(), N);
-        jsf32x16_free(ptr);
+        unsafe { jsf32x16_next_u32s(ptr, buf32.as_mut_ptr(), N) };
+        unsafe { jsf32x16_free(ptr) };
     }
 
     let ceiling_gbps = measure_write_ceiling(&mut buf32);
@@ -329,8 +329,8 @@ fn main() {
     {
         use urng::cabi::splitmix64_next_u64s;
         let ptr = splitmix64_new(0);
-        splitmix64_next_u64s(ptr, buf64.as_mut_ptr(), N);
-        splitmix64_free(ptr);
+        unsafe { splitmix64_next_u64s(ptr, buf64.as_mut_ptr(), N) };
+        unsafe { splitmix64_free(ptr) };
     }
 
     let mut r64 = Vec::new();

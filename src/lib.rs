@@ -4,9 +4,9 @@
 mod rng;
 pub use crate::rng::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod rngv;
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use crate::rngv::*;
 
 mod prng;

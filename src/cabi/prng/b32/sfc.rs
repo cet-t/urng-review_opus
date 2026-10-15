@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::{prng::b32::Sfc32, rng::Rng};
 
@@ -10,32 +9,32 @@ pub extern "C" fn sfc32_new(seed: u32) -> *mut Sfc32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc32_free(ptr: *mut Sfc32) {
+pub unsafe extern "C" fn sfc32_free(ptr: *mut Sfc32) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc32_next_u32s(ptr: *mut Sfc32, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn sfc32_next_u32s(ptr: *mut Sfc32, out: *mut u32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfc32::new, |r| r.nextu());
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc32_next_f32s(ptr: *mut Sfc32, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn sfc32_next_f32s(ptr: *mut Sfc32, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfc32::new, |r| r.nextf());
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc32_rand_i32s(
+pub unsafe extern "C" fn sfc32_rand_i32s(
     ptr: *mut Sfc32,
     out: *mut i32,
     count: usize,
@@ -43,14 +42,14 @@ pub extern "C" fn sfc32_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfc32::new, |r| r.randi(min, max));
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sfc32_rand_f32s(
+pub unsafe extern "C" fn sfc32_rand_f32s(
     ptr: *mut Sfc32,
     out: *mut f32,
     count: usize,
@@ -58,21 +57,21 @@ pub extern "C" fn sfc32_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfc32::new, |r| r.randf(min, max));
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use rayon::prelude::*;
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
-    use std::{ptr, slice::from_raw_parts_mut};
+    use std::ptr;
 
     use crate::{
         _internal::chunk_seed32,
@@ -89,7 +88,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x4_free(ptr: *mut Sfc32x4) {
+    pub unsafe extern "C" fn sfc32x4_free(ptr: *mut Sfc32x4) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -164,14 +163,14 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x4_next_u32s(ptr: *mut Sfc32x4, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn sfc32x4_next_u32s(ptr: *mut Sfc32x4, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = rng.nextu()[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X4_PAR_CHUNK)
                 .enumerate()
@@ -187,14 +186,14 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x4_next_f32s(ptr: *mut Sfc32x4, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn sfc32x4_next_f32s(ptr: *mut Sfc32x4, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = rng.nextu()[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X4_PAR_CHUNK)
                 .enumerate()
@@ -210,7 +209,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x4_rand_i32s(
+    pub unsafe extern "C" fn sfc32x4_rand_i32s(
         ptr: *mut Sfc32x4,
         out: *mut i32,
         count: usize,
@@ -221,11 +220,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = rng.nextu()[0];
-            let v_range = _mm_set1_epi32((max as i64 - min as i64 + 1) as u32 as i32);
+            let v_range = _mm_set1_epi32(crate::rngv::scale32(min, max));
             let v_min = _mm_set1_epi32(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X4_PAR_CHUNK)
                 .enumerate()
@@ -243,7 +242,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x4_rand_f32s(
+    pub unsafe extern "C" fn sfc32x4_rand_f32s(
         ptr: *mut Sfc32x4,
         out: *mut f32,
         count: usize,
@@ -254,11 +253,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = rng.nextu()[0];
             let v_mult = _mm_set1_ps(max - min);
             let v_min = _mm_set1_ps(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X4_PAR_CHUNK)
                 .enumerate()
@@ -279,11 +278,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn sfc32x8_new(seed: u32) -> *mut Sfc32x8 {
+        if !(std::arch::is_x86_feature_detected!("avx2")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Sfc32x8::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x8_free(ptr: *mut Sfc32x8) {
+    pub unsafe extern "C" fn sfc32x8_free(ptr: *mut Sfc32x8) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -339,7 +342,11 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -384,7 +391,11 @@ mod simd {
             _mm256_storeu_ps(tmp.as_mut_ptr(), rng.nextfv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -447,7 +458,11 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.randiv(v_range, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -498,20 +513,24 @@ mod simd {
             _mm256_storeu_ps(tmp.as_mut_ptr(), rng.randfv(v_mult, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x8_next_u32s(ptr: *mut Sfc32x8, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn sfc32x8_next_u32s(ptr: *mut Sfc32x8, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X8_PAR_CHUNK)
                 .enumerate()
@@ -527,17 +546,17 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x8_next_f32s(ptr: *mut Sfc32x8, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn sfc32x8_next_f32s(ptr: *mut Sfc32x8, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X8_PAR_CHUNK)
                 .enumerate()
@@ -553,7 +572,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x8_rand_i32s(
+    pub unsafe extern "C" fn sfc32x8_rand_i32s(
         ptr: *mut Sfc32x8,
         out: *mut i32,
         count: usize,
@@ -564,15 +583,15 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
 
             let v_min = _mm256_set1_epi32(min);
-            let v_range = _mm256_set1_epi64x(max as i64 - min as i64 + 1);
+            let v_range = _mm256_set1_epi32(crate::rngv::scale32(min, max));
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X8_PAR_CHUNK)
                 .enumerate()
@@ -590,7 +609,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x8_rand_f32s(
+    pub unsafe extern "C" fn sfc32x8_rand_f32s(
         ptr: *mut Sfc32x8,
         out: *mut f32,
         count: usize,
@@ -601,7 +620,7 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
@@ -609,7 +628,7 @@ mod simd {
             let v_mult = _mm256_set1_ps(max - min);
             let v_min = _mm256_set1_ps(min);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X8_PAR_CHUNK)
                 .enumerate()
@@ -630,11 +649,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn sfc32x16_new(seed: u32) -> *mut Sfc32x16 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Sfc32x16::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x16_free(ptr: *mut Sfc32x16) {
+    pub unsafe extern "C" fn sfc32x16_free(ptr: *mut Sfc32x16) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -699,7 +722,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -755,7 +782,11 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -817,7 +848,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -879,21 +914,25 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x16_next_u32s(ptr: *mut Sfc32x16, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn sfc32x16_next_u32s(ptr: *mut Sfc32x16, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X16_PAR_CHUNK)
                 .enumerate()
@@ -909,18 +948,18 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x16_next_f32s(ptr: *mut Sfc32x16, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn sfc32x16_next_f32s(ptr: *mut Sfc32x16, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X16_PAR_CHUNK)
                 .enumerate()
@@ -936,7 +975,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x16_rand_i32s(
+    pub unsafe extern "C" fn sfc32x16_rand_i32s(
         ptr: *mut Sfc32x16,
         out: *mut i32,
         count: usize,
@@ -947,16 +986,16 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             let base_seed = tmp[0];
 
             let v_min = _mm512_set1_epi32(min);
-            let v_range = _mm512_set1_epi64(max as i64 - min as i64 + 1);
+            let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X16_PAR_CHUNK)
                 .enumerate()
@@ -974,7 +1013,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn sfc32x16_rand_f32s(
+    pub unsafe extern "C" fn sfc32x16_rand_f32s(
         ptr: *mut Sfc32x16,
         out: *mut f32,
         count: usize,
@@ -985,7 +1024,7 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; SFC32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
@@ -994,7 +1033,7 @@ mod simd {
             let v_mult = _mm512_set1_ps(max - min);
             let v_min = _mm512_set1_ps(min);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(SFC32X16_PAR_CHUNK)
                 .enumerate()

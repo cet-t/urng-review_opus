@@ -1,4 +1,3 @@
-﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -16,7 +15,7 @@ pub extern "C" fn xoroshiro64ss_new(seed: u32) -> *mut Xoroshiro64Ss {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro64ss_free(ptr: *mut Xoroshiro64Ss) {
+pub unsafe extern "C" fn xoroshiro64ss_free(ptr: *mut Xoroshiro64Ss) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -53,33 +52,33 @@ where
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro64ss_next_u32s(ptr: *mut Xoroshiro64Ss, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn xoroshiro64ss_next_u32s(ptr: *mut Xoroshiro64Ss, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.nextu());
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro64ss_next_f32s(ptr: *mut Xoroshiro64Ss, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn xoroshiro64ss_next_f32s(ptr: *mut Xoroshiro64Ss, out: *mut f32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.nextf());
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro64ss_rand_i32s(
+pub unsafe extern "C" fn xoroshiro64ss_rand_i32s(
     ptr: *mut Xoroshiro64Ss,
     out: *mut i32,
     count: usize,
@@ -90,15 +89,15 @@ pub extern "C" fn xoroshiro64ss_rand_i32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.randi(min, max));
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn xoroshiro64ss_rand_f32s(
+pub unsafe extern "C" fn xoroshiro64ss_rand_f32s(
     ptr: *mut Xoroshiro64Ss,
     out: *mut f32,
     count: usize,
@@ -109,17 +108,17 @@ pub extern "C" fn xoroshiro64ss_rand_f32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
+        let Some(rng) = ptr.as_mut() else { return };
         let seed = rng.nextu();
-        let buffer = from_raw_parts_mut(out, count);
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.randf(min, max));
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     #[cfg(target_arch = "x86_64")]
     use crate::prng::b32::xoroshiro::{XOROSHIRO64SSX8, XOROSHIRO64SSX16};
@@ -131,17 +130,21 @@ mod simd {
     use rayon::prelude::*;
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
-    use std::{ptr, slice::from_raw_parts_mut};
+    use std::ptr;
 
     // --- Xoroshiro64Ssx8 (AVX2) ---
 
     #[unsafe(no_mangle)]
     pub extern "C" fn xoroshiro64ssx8_new(seed: u32) -> *mut Xoroshiro64Ssx8 {
+        if !(std::arch::is_x86_feature_detected!("avx2")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Xoroshiro64Ssx8::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx8_free(ptr: *mut Xoroshiro64Ssx8) {
+    pub unsafe extern "C" fn xoroshiro64ssx8_free(ptr: *mut Xoroshiro64Ssx8) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -198,7 +201,11 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -246,7 +253,11 @@ mod simd {
             _mm256_storeu_ps(tmp.as_mut_ptr(), rng.nextfv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -314,7 +325,11 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.randiv(v_range, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
@@ -364,10 +379,14 @@ mod simd {
             _mm256_storeu_ps(tmp.as_mut_ptr(), rng.randfv(v_mult, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx8_next_u32s(
+    pub unsafe extern "C" fn xoroshiro64ssx8_next_u32s(
         ptr: *mut Xoroshiro64Ssx8,
         out: *mut u32,
         count: usize,
@@ -376,11 +395,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
@@ -396,7 +415,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx8_next_f32s(
+    pub unsafe extern "C" fn xoroshiro64ssx8_next_f32s(
         ptr: *mut Xoroshiro64Ssx8,
         out: *mut f32,
         count: usize,
@@ -405,11 +424,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as _, rng.nextuv());
             let base_seed = tmp[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
@@ -425,7 +444,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx8_rand_i32s(
+    pub unsafe extern "C" fn xoroshiro64ssx8_rand_i32s(
         ptr: *mut Xoroshiro64Ssx8,
         out: *mut i32,
         count: usize,
@@ -436,13 +455,13 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
-            let v_range = _mm256_set1_epi64x(max as i64 - min as i64 + 1);
+            let v_range = _mm256_set1_epi32(crate::rngv::scale32(min, max));
             let v_min = _mm256_set1_epi32(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
@@ -460,7 +479,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx8_rand_f32s(
+    pub unsafe extern "C" fn xoroshiro64ssx8_rand_f32s(
         ptr: *mut Xoroshiro64Ssx8,
         out: *mut f32,
         count: usize,
@@ -471,13 +490,13 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
             let v_mult = _mm256_set1_ps(max - min);
             let v_min = _mm256_set1_ps(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
@@ -498,11 +517,15 @@ mod simd {
 
     #[unsafe(no_mangle)]
     pub extern "C" fn xoroshiro64ssx16_new(seed: u32) -> *mut Xoroshiro64Ssx16 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Xoroshiro64Ssx16::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx16_free(ptr: *mut Xoroshiro64Ssx16) {
+    pub unsafe extern "C" fn xoroshiro64ssx16_free(ptr: *mut Xoroshiro64Ssx16) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -559,7 +582,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -607,7 +634,11 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), rng.nextfv());
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -675,7 +706,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.randiv(v_range, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -725,10 +760,14 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), rng.randfv(v_mult, v_min));
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx16_next_u32s(
+    pub unsafe extern "C" fn xoroshiro64ssx16_next_u32s(
         ptr: *mut Xoroshiro64Ssx16,
         out: *mut u32,
         count: usize,
@@ -737,11 +776,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
@@ -757,7 +796,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx16_next_f32s(
+    pub unsafe extern "C" fn xoroshiro64ssx16_next_f32s(
         ptr: *mut Xoroshiro64Ssx16,
         out: *mut f32,
         count: usize,
@@ -766,11 +805,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
@@ -786,7 +825,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx16_rand_i32s(
+    pub unsafe extern "C" fn xoroshiro64ssx16_rand_i32s(
         ptr: *mut Xoroshiro64Ssx16,
         out: *mut i32,
         count: usize,
@@ -797,13 +836,13 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
-            let v_range = _mm512_set1_epi64(max as i64 - min as i64 + 1);
+            let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
             let v_min = _mm512_set1_epi32(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
@@ -821,7 +860,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoroshiro64ssx16_rand_f32s(
+    pub unsafe extern "C" fn xoroshiro64ssx16_rand_f32s(
         ptr: *mut Xoroshiro64Ssx16,
         out: *mut f32,
         count: usize,
@@ -832,13 +871,13 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
             let base_seed = tmp[0];
             let v_mult = _mm512_set1_ps(max - min);
             let v_min = _mm512_set1_ps(min);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()

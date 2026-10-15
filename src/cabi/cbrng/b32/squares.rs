@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -6,7 +5,7 @@ use rayon::slice::ParallelSliceMut;
 use crate::cbrng::b32::Squares32;
 use crate::{i2f_bits, u2f_01};
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd_chunks {
     use crate::cbrng::b32::{SQUARES32x8, Squares32x8};
     use crate::{i2f_bits, u2f_01};
@@ -90,7 +89,11 @@ mod simd_chunks {
                 final_rem.copy_from_slice(&tmp[..final_rem.len()]);
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[allow(clippy::too_many_arguments)]
@@ -159,7 +162,11 @@ mod simd_chunks {
                 }
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[allow(clippy::too_many_arguments)]
@@ -249,6 +256,8 @@ mod simd_chunks {
                     final_rem[j] = ((tmp[j] as u64 * range) >> 32) as i32 + min;
                 }
             }
+            // Non-temporal stores must be fenced on the issuing thread.
+            _mm_sfence();
         }
     }
 
@@ -323,7 +332,11 @@ mod simd_chunks {
                 }
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 } // mod simd_chunks
 
 /// Creates a new `Squares32` instance.
@@ -335,7 +348,7 @@ pub extern "C" fn squares32_new(seed: u32) -> *mut Squares32 {
 
 /// Frees the memory of a `Squares32` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn squares32_free(ptr: *mut Squares32) {
+pub unsafe extern "C" fn squares32_free(ptr: *mut Squares32) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -350,10 +363,10 @@ const SQUARES32_PAR_CHUNK: usize = 4096;
 /// Since z_i = y_i + k, and y_{i+1} = y_i + k, we get z_i == y_{i+1},
 /// eliminating redundant adds. No loop-carried dependency within a batch.
 #[unsafe(no_mangle)]
-pub extern "C" fn squares32_next_u32s(ptr: *mut Squares32, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn squares32_next_u32s(ptr: *mut Squares32, out: *mut u32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let c0 = rng.c;
         let k = rng.k;
         let k4 = k.wrapping_mul(4);
@@ -397,10 +410,10 @@ pub extern "C" fn squares32_next_u32s(ptr: *mut Squares32, out: *mut u32, count:
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 /// Uses a 4-way unrolled parallel kernel for high throughput.
 #[unsafe(no_mangle)]
-pub extern "C" fn squares32_next_f32s(ptr: *mut Squares32, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn squares32_next_f32s(ptr: *mut Squares32, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let c0 = rng.c;
         let k = rng.k;
         let k4 = k << 2;
@@ -443,7 +456,7 @@ pub extern "C" fn squares32_next_f32s(ptr: *mut Squares32, out: *mut f32, count:
 /// Fills the output buffer with random `i32` values in the range [min, max].
 /// Uses a 4-way unrolled parallel kernel for high throughput.
 #[unsafe(no_mangle)]
-pub extern "C" fn squares32_rand_i32s(
+pub unsafe extern "C" fn squares32_rand_i32s(
     ptr: *mut Squares32,
     out: *mut i32,
     count: usize,
@@ -451,8 +464,8 @@ pub extern "C" fn squares32_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let c0 = rng.c;
         let k = rng.k;
         let k4 = k << 2;
@@ -496,7 +509,7 @@ pub extern "C" fn squares32_rand_i32s(
 /// Fills the output buffer with random `f32` values in the range [min, max).
 /// Uses a 4-way unrolled parallel kernel for high throughput.
 #[unsafe(no_mangle)]
-pub extern "C" fn squares32_rand_f32s(
+pub unsafe extern "C" fn squares32_rand_f32s(
     ptr: *mut Squares32,
     out: *mut f32,
     count: usize,
@@ -504,8 +517,8 @@ pub extern "C" fn squares32_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let c0 = rng.c;
         let k = rng.k;
         let k4 = k << 2;
@@ -546,10 +559,10 @@ pub extern "C" fn squares32_rand_f32s(
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use super::simd_chunks::*;
     use super::*;
@@ -560,12 +573,16 @@ mod simd {
     /// The caller is responsible for freeing the memory using `squares32x8_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn squares32x8_new(seed: u32) -> *mut Squares32x8 {
+        if !(std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512dq")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Squares32x8::new(seed))) }
     }
 
     /// Frees the memory of a `Squares32x8` instance.
     #[unsafe(no_mangle)]
-    pub extern "C" fn squares32x8_free(ptr: *mut Squares32x8) {
+    pub unsafe extern "C" fn squares32x8_free(ptr: *mut Squares32x8) {
         if !ptr.is_null() {
             unsafe {
                 let _ = Box::from_raw(ptr);
@@ -576,13 +593,13 @@ mod simd {
     /// Fills the output buffer with the next random `u32` values.
     /// This function utilizes AVX-512 SIMD and parallel processing for maximum throughput.
     #[unsafe(no_mangle)]
-    pub extern "C" fn squares32x8_next_u32s(ptr: *mut Squares32x8, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn squares32x8_next_u32s(ptr: *mut Squares32x8, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
-            let buffer = from_raw_parts_mut(out, count);
+            let Some(rng) = ptr.as_mut() else { return };
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             let mut c_arr = [0u64; SQUARES32x8];
             _mm512_storeu_si512(c_arr.as_mut_ptr() as *mut _, rng.c);
             let c0 = c_arr[0];
@@ -607,13 +624,13 @@ mod simd {
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     /// This function utilizes AVX-512 SIMD and parallel processing for maximum throughput.
     #[unsafe(no_mangle)]
-    pub extern "C" fn squares32x8_next_f32s(ptr: *mut Squares32x8, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn squares32x8_next_f32s(ptr: *mut Squares32x8, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
-            let buffer = from_raw_parts_mut(out, count);
+            let Some(rng) = ptr.as_mut() else { return };
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             let mut c_arr = [0u64; SQUARES32x8];
             _mm512_storeu_si512(c_arr.as_mut_ptr() as *mut _, rng.c);
             let c0 = c_arr[0];
@@ -652,7 +669,7 @@ mod simd {
     /// Fills the output buffer with random `i32` values in the range [min, max].
     /// This function utilizes AVX-512 SIMD and parallel processing for maximum throughput.
     #[unsafe(no_mangle)]
-    pub extern "C" fn squares32x8_rand_i32s(
+    pub unsafe extern "C" fn squares32x8_rand_i32s(
         ptr: *mut Squares32x8,
         out: *mut i32,
         count: usize,
@@ -663,8 +680,8 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
-            let buffer = from_raw_parts_mut(out, count);
+            let Some(rng) = ptr.as_mut() else { return };
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             let mut c_arr = [0u64; SQUARES32x8];
             _mm512_storeu_si512(c_arr.as_mut_ptr() as *mut _, rng.c);
             let c0 = c_arr[0];
@@ -706,7 +723,7 @@ mod simd {
     /// Fills the output buffer with random `f32` values in the range [min, max).
     /// This function utilizes AVX-512 SIMD and parallel processing for maximum throughput.
     #[unsafe(no_mangle)]
-    pub extern "C" fn squares32x8_rand_f32s(
+    pub unsafe extern "C" fn squares32x8_rand_f32s(
         ptr: *mut Squares32x8,
         out: *mut f32,
         count: usize,
@@ -717,8 +734,8 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
-            let buffer = from_raw_parts_mut(out, count);
+            let Some(rng) = ptr.as_mut() else { return };
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             let mut c_arr = [0u64; SQUARES32x8];
             _mm512_storeu_si512(c_arr.as_mut_ptr() as *mut _, rng.c);
             let c0 = c_arr[0];

@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::prng::b32::{
     Mt19937, Sfmt607, Sfmt1279, Sfmt2281, Sfmt4253, Sfmt11213, Sfmt19937, Sfmt44497, Sfmt86243,
@@ -15,7 +14,7 @@ pub extern "C" fn mt19937_new(seed: u32) -> *mut Mt19937 {
 
 /// Frees the memory of a `Mt19937` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt19937_free(ptr: *mut Mt19937) {
+pub unsafe extern "C" fn mt19937_free(ptr: *mut Mt19937) {
     if !ptr.is_null() {
         unsafe {
             drop(Box::from_raw(ptr));
@@ -25,30 +24,30 @@ pub extern "C" fn mt19937_free(ptr: *mut Mt19937) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn mt19937_next_u32s(ptr: *mut Mt19937, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn mt19937_next_u32s(ptr: *mut Mt19937, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn mt19937_next_f32s(ptr: *mut Mt19937, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn mt19937_next_f32s(ptr: *mut Mt19937, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn mt19937_rand_i32s(
+pub unsafe extern "C" fn mt19937_rand_i32s(
     ptr: *mut Mt19937,
     out: *mut i32,
     count: usize,
@@ -56,8 +55,8 @@ pub extern "C" fn mt19937_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| {
             r.randi(min, max)
         });
@@ -66,7 +65,7 @@ pub extern "C" fn mt19937_rand_i32s(
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn mt19937_rand_f32s(
+pub unsafe extern "C" fn mt19937_rand_f32s(
     ptr: *mut Mt19937,
     out: *mut f32,
     count: usize,
@@ -74,8 +73,8 @@ pub extern "C" fn mt19937_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| {
             r.randf(min, max)
         });
@@ -91,7 +90,7 @@ pub extern "C" fn sfmt19937_new(seed: u64) -> *mut Sfmt19937 {
 
 /// Frees the memory of a `Sfmt19937` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt19937_free(ptr: *mut Sfmt19937) {
+pub unsafe extern "C" fn sfmt19937_free(ptr: *mut Sfmt19937) {
     if !ptr.is_null() {
         unsafe {
             drop(Box::from_raw(ptr));
@@ -101,30 +100,30 @@ pub extern "C" fn sfmt19937_free(ptr: *mut Sfmt19937) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt19937_next_u32s(ptr: *mut Sfmt19937, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn sfmt19937_next_u32s(ptr: *mut Sfmt19937, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt19937_next_f32s(ptr: *mut Sfmt19937, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn sfmt19937_next_f32s(ptr: *mut Sfmt19937, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt19937_rand_i32s(
+pub unsafe extern "C" fn sfmt19937_rand_i32s(
     ptr: *mut Sfmt19937,
     out: *mut i32,
     count: usize,
@@ -132,8 +131,8 @@ pub extern "C" fn sfmt19937_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| {
             r.randi(min, max)
         });
@@ -142,7 +141,7 @@ pub extern "C" fn sfmt19937_rand_i32s(
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn sfmt19937_rand_f32s(
+pub unsafe extern "C" fn sfmt19937_rand_f32s(
     ptr: *mut Sfmt19937,
     out: *mut f32,
     count: usize,
@@ -150,8 +149,8 @@ pub extern "C" fn sfmt19937_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| {
             r.randf(min, max)
         });
@@ -174,7 +173,7 @@ macro_rules! impl_sfmt_cabi {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn $free_fn(ptr: *mut $ty) {
+        pub unsafe extern "C" fn $free_fn(ptr: *mut $ty) {
             if !ptr.is_null() {
                 unsafe {
                     drop(Box::from_raw(ptr));
@@ -183,28 +182,28 @@ macro_rules! impl_sfmt_cabi {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn $next_u32s_fn(ptr: *mut $ty, out: *mut u32, count: usize) {
+        pub unsafe extern "C" fn $next_u32s_fn(ptr: *mut $ty, out: *mut u32, count: usize) {
             if count == 0 {
                 return;
             }
             unsafe {
-                let rng = &mut *ptr;
-                let buffer = from_raw_parts_mut(out, count);
+                let Some(rng) = ptr.as_mut() else { return };
+                let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
                 crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| r.nextu());
             }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn $next_f32s_fn(ptr: *mut $ty, out: *mut f32, count: usize) {
+        pub unsafe extern "C" fn $next_f32s_fn(ptr: *mut $ty, out: *mut f32, count: usize) {
             unsafe {
-                let rng = &mut *ptr;
-                let buffer = from_raw_parts_mut(out, count);
+                let Some(rng) = ptr.as_mut() else { return };
+                let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
                 crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| r.nextf());
             }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn $rand_i32s_fn(
+        pub unsafe extern "C" fn $rand_i32s_fn(
             ptr: *mut $ty,
             out: *mut i32,
             count: usize,
@@ -212,8 +211,8 @@ macro_rules! impl_sfmt_cabi {
             max: i32,
         ) {
             unsafe {
-                let rng = &mut *ptr;
-                let buffer = from_raw_parts_mut(out, count);
+                let Some(rng) = ptr.as_mut() else { return };
+                let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
                 crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| {
                     r.randi(min, max)
                 });
@@ -221,7 +220,7 @@ macro_rules! impl_sfmt_cabi {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn $rand_f32s_fn(
+        pub unsafe extern "C" fn $rand_f32s_fn(
             ptr: *mut $ty,
             out: *mut f32,
             count: usize,
@@ -229,8 +228,8 @@ macro_rules! impl_sfmt_cabi {
             max: f32,
         ) {
             unsafe {
-                let rng = &mut *ptr;
-                let buffer = from_raw_parts_mut(out, count);
+                let Some(rng) = ptr.as_mut() else { return };
+                let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
                 crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| {
                     r.randf(min, max)
                 });

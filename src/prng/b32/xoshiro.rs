@@ -112,10 +112,10 @@ impl Rng for Xoshiro128Ss {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
@@ -173,11 +173,11 @@ pub mod simd {
         }
     }
 
-    impl RngV for Xoshiro128Ppx16 {
-        type Word = __m512i;
-
+    impl Xoshiro128Ppx16 {
+        #[target_feature(enable = "avx512f")]
         #[inline]
-        fn nextuv(&mut self) -> Self::Word {
+        #[allow(unused_unsafe)]
+        fn step(&mut self) -> __m512i {
             let s0 = self.s0;
             let s1 = self.s1;
             let s2 = self.s2;
@@ -262,11 +262,11 @@ pub mod simd {
         }
     }
 
-    impl RngV for Xoshiro128Ssx16 {
-        type Word = __m512i;
-
+    impl Xoshiro128Ssx16 {
+        #[target_feature(enable = "avx512f")]
         #[inline]
-        fn nextuv(&mut self) -> Self::Word {
+        #[allow(unused_unsafe)]
+        fn step(&mut self) -> __m512i {
             let s0 = self.s0;
             let s1 = self.s1;
             let s2 = self.s2;
@@ -298,6 +298,28 @@ pub mod simd {
             s[4]
         }
     }
+    // SAFETY: values are only created by the `avx512f` constructor `new`.
+    unsafe impl RngV for Xoshiro128Ppx16 {
+        type Word = __m512i;
+
+        #[inline(always)]
+        fn nextuv(&mut self) -> __m512i {
+            // SAFETY: the CPU features are guaranteed by construction.
+            unsafe { self.step() }
+        }
+    }
+
+    // SAFETY: values are only created by the `avx512f` constructor `new`.
+    unsafe impl RngV for Xoshiro128Ssx16 {
+        type Word = __m512i;
+
+        #[inline(always)]
+        fn nextuv(&mut self) -> __m512i {
+            // SAFETY: the CPU features are guaranteed by construction.
+            unsafe { self.step() }
+        }
+    }
+
 }
 
 #[cfg(test)]

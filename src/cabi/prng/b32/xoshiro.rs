@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::prng::b32::{Xoshiro128Pp, Xoshiro128Ss};
 use crate::rng::Rng;
@@ -14,7 +13,7 @@ pub extern "C" fn xoshiro128pp_new(seed: u32) -> *mut Xoshiro128Pp {
 
 /// Frees the memory of a `Xoshiro128Pp` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128pp_free(ptr: *mut Xoshiro128Pp) {
+pub unsafe extern "C" fn xoshiro128pp_free(ptr: *mut Xoshiro128Pp) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -24,33 +23,33 @@ pub extern "C" fn xoshiro128pp_free(ptr: *mut Xoshiro128Pp) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128pp_next_u32s(ptr: *mut Xoshiro128Pp, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn xoshiro128pp_next_u32s(ptr: *mut Xoshiro128Pp, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128pp_next_f32s(ptr: *mut Xoshiro128Pp, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn xoshiro128pp_next_f32s(ptr: *mut Xoshiro128Pp, out: *mut f32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128pp_rand_i32s(
+pub unsafe extern "C" fn xoshiro128pp_rand_i32s(
     ptr: *mut Xoshiro128Pp,
     out: *mut i32,
     count: usize,
@@ -61,8 +60,8 @@ pub extern "C" fn xoshiro128pp_rand_i32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| {
             r.randi(min, max)
         });
@@ -71,7 +70,7 @@ pub extern "C" fn xoshiro128pp_rand_i32s(
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128pp_rand_f32s(
+pub unsafe extern "C" fn xoshiro128pp_rand_f32s(
     ptr: *mut Xoshiro128Pp,
     out: *mut f32,
     count: usize,
@@ -82,8 +81,8 @@ pub extern "C" fn xoshiro128pp_rand_f32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| {
             r.randf(min, max)
         });
@@ -101,7 +100,7 @@ pub extern "C" fn xoshiro128ss_new(seed: u32) -> *mut Xoshiro128Ss {
 
 /// Frees the memory of a `Xoshiro128Ss` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128ss_free(ptr: *mut Xoshiro128Ss) {
+pub unsafe extern "C" fn xoshiro128ss_free(ptr: *mut Xoshiro128Ss) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -111,33 +110,33 @@ pub extern "C" fn xoshiro128ss_free(ptr: *mut Xoshiro128Ss) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128ss_next_u32s(ptr: *mut Xoshiro128Ss, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn xoshiro128ss_next_u32s(ptr: *mut Xoshiro128Ss, out: *mut u32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128ss_next_f32s(ptr: *mut Xoshiro128Ss, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn xoshiro128ss_next_f32s(ptr: *mut Xoshiro128Ss, out: *mut f32, count: usize) {
     if count == 0 {
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128ss_rand_i32s(
+pub unsafe extern "C" fn xoshiro128ss_rand_i32s(
     ptr: *mut Xoshiro128Ss,
     out: *mut i32,
     count: usize,
@@ -148,8 +147,8 @@ pub extern "C" fn xoshiro128ss_rand_i32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| {
             r.randi(min, max)
         });
@@ -158,7 +157,7 @@ pub extern "C" fn xoshiro128ss_rand_i32s(
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn xoshiro128ss_rand_f32s(
+pub unsafe extern "C" fn xoshiro128ss_rand_f32s(
     ptr: *mut Xoshiro128Ss,
     out: *mut f32,
     count: usize,
@@ -169,18 +168,18 @@ pub extern "C" fn xoshiro128ss_rand_f32s(
         return;
     }
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| {
             r.randf(min, max)
         });
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use crate::_internal::chunk_seed32;
     use crate::RngV;
@@ -189,7 +188,7 @@ mod simd {
     use rayon::slice::ParallelSliceMut;
     #[cfg(target_arch = "x86_64")]
     use std::arch::x86_64::*;
-    use std::{ptr, slice::from_raw_parts_mut};
+    use std::ptr;
 
     #[cfg(target_arch = "x86_64")]
     const XOSHIRO128X16_LANES: usize = 16;
@@ -222,12 +221,16 @@ mod simd {
     /// The caller is responsible for freeing the memory using `xoshiro128ppx16_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn xoshiro128ppx16_new(seed: u32) -> *mut Xoshiro128Ppx16 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Xoshiro128Ppx16::new(seed))) }
     }
 
     /// Frees the memory of a `Xoshiro128Ppx16` instance.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ppx16_free(ptr: *mut Xoshiro128Ppx16) {
+    pub unsafe extern "C" fn xoshiro128ppx16_free(ptr: *mut Xoshiro128Ppx16) {
         if !ptr.is_null() {
             unsafe {
                 drop(Box::from_raw(ptr));
@@ -294,7 +297,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -330,7 +337,11 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -368,7 +379,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -406,11 +421,15 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     /// Fills the output buffer with the next random `u32` values.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ppx16_next_u32s(
+    pub unsafe extern "C" fn xoshiro128ppx16_next_u32s(
         ptr: *mut Xoshiro128Ppx16,
         out: *mut u32,
         count: usize,
@@ -419,9 +438,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ppx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
@@ -439,7 +458,7 @@ mod simd {
 
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ppx16_next_f32s(
+    pub unsafe extern "C" fn xoshiro128ppx16_next_f32s(
         ptr: *mut Xoshiro128Ppx16,
         out: *mut f32,
         count: usize,
@@ -448,9 +467,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ppx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
@@ -468,7 +487,7 @@ mod simd {
 
     /// Fills the output buffer with random `i32` values in the range [min, max].
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ppx16_rand_i32s(
+    pub unsafe extern "C" fn xoshiro128ppx16_rand_i32s(
         ptr: *mut Xoshiro128Ppx16,
         out: *mut i32,
         count: usize,
@@ -479,16 +498,16 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ppx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
                     let mut local_rng = Xoshiro128Ppx16::new(chunk_seed32(base_seed, chunk_idx));
-                    let v_range = _mm512_set1_epi64(max as i64 - min as i64 + 1);
+                    let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     xoshiro128ppx16_rand_i32s_chunk(
                         &mut local_rng,
@@ -503,7 +522,7 @@ mod simd {
 
     /// Fills the output buffer with random `f32` values in the range [min, max).
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ppx16_rand_f32s(
+    pub unsafe extern "C" fn xoshiro128ppx16_rand_f32s(
         ptr: *mut Xoshiro128Ppx16,
         out: *mut f32,
         count: usize,
@@ -514,9 +533,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ppx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
@@ -542,12 +561,16 @@ mod simd {
     /// The caller is responsible for freeing the memory using `xoshiro128ssx16_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn xoshiro128ssx16_new(seed: u32) -> *mut Xoshiro128Ssx16 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Xoshiro128Ssx16::new(seed))) }
     }
 
     /// Frees the memory of a `Xoshiro128Ssx16` instance.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ssx16_free(ptr: *mut Xoshiro128Ssx16) {
+    pub unsafe extern "C" fn xoshiro128ssx16_free(ptr: *mut Xoshiro128Ssx16) {
         if !ptr.is_null() {
             unsafe {
                 let _ = Box::from_raw(ptr);
@@ -614,7 +637,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -650,7 +677,11 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -688,7 +719,11 @@ mod simd {
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
@@ -726,11 +761,15 @@ mod simd {
             _mm512_storeu_ps(tmp.as_mut_ptr(), v);
             ptr::copy_nonoverlapping(tmp.as_ptr(), out_ptr, remaining);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     /// Fills the output buffer with the next random `u32` values.
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ssx16_next_u32s(
+    pub unsafe extern "C" fn xoshiro128ssx16_next_u32s(
         ptr: *mut Xoshiro128Ssx16,
         out: *mut u32,
         count: usize,
@@ -739,9 +778,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ssx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
@@ -759,7 +798,7 @@ mod simd {
 
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ssx16_next_f32s(
+    pub unsafe extern "C" fn xoshiro128ssx16_next_f32s(
         ptr: *mut Xoshiro128Ssx16,
         out: *mut f32,
         count: usize,
@@ -768,9 +807,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ssx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
@@ -788,7 +827,7 @@ mod simd {
 
     /// Fills the output buffer with random `i32` values in the range [min, max].
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ssx16_rand_i32s(
+    pub unsafe extern "C" fn xoshiro128ssx16_rand_i32s(
         ptr: *mut Xoshiro128Ssx16,
         out: *mut i32,
         count: usize,
@@ -799,16 +838,16 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ssx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
                     let mut local_rng = Xoshiro128Ssx16::new(chunk_seed32(base_seed, chunk_idx));
-                    let v_range = _mm512_set1_epi64(max as i64 - min as i64 + 1);
+                    let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     xoshiro128ssx16_rand_i32s_chunk(
                         &mut local_rng,
@@ -823,7 +862,7 @@ mod simd {
 
     /// Fills the output buffer with random `f32` values in the range [min, max).
     #[unsafe(no_mangle)]
-    pub extern "C" fn xoshiro128ssx16_rand_f32s(
+    pub unsafe extern "C" fn xoshiro128ssx16_rand_f32s(
         ptr: *mut Xoshiro128Ssx16,
         out: *mut f32,
         count: usize,
@@ -834,9 +873,9 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let base_seed = xoshiro128ssx16_base_seed(rng);
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)

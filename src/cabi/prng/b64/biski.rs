@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -17,7 +16,7 @@ pub extern "C" fn biski64_new(seed: u64) -> *mut Biski64 {
 /// Frees a `Biski64` instance previously created by [`biski64_free`].
 /// Does nothing if `ptr` is null.
 #[unsafe(no_mangle)]
-pub extern "C" fn biski64_free(ptr: *mut Biski64) {
+pub unsafe extern "C" fn biski64_free(ptr: *mut Biski64) {
     if !ptr.is_null() {
         unsafe { drop(Box::from_raw(ptr)) };
     }
@@ -26,10 +25,10 @@ pub extern "C" fn biski64_free(ptr: *mut Biski64) {
 const BISKI64_PAR_CHUNK: usize = 4;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn biski64_next_u64s(ptr: *mut Biski64, out: *mut u64, count: usize) {
+pub unsafe extern "C" fn biski64_next_u64s(ptr: *mut Biski64, out: *mut u64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -47,10 +46,10 @@ pub extern "C" fn biski64_next_u64s(ptr: *mut Biski64, out: *mut u64, count: usi
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn biski64_next_f64s(ptr: *mut Biski64, out: *mut f64, count: usize) {
+pub unsafe extern "C" fn biski64_next_f64s(ptr: *mut Biski64, out: *mut f64, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -68,7 +67,7 @@ pub extern "C" fn biski64_next_f64s(ptr: *mut Biski64, out: *mut f64, count: usi
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn biski64_rand_i64s(
+pub unsafe extern "C" fn biski64_rand_i64s(
     ptr: *mut Biski64,
     out: *mut i64,
     count: usize,
@@ -76,8 +75,8 @@ pub extern "C" fn biski64_rand_i64s(
     max: i64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -95,7 +94,7 @@ pub extern "C" fn biski64_rand_i64s(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn biski64_rand_f64s(
+pub unsafe extern "C" fn biski64_rand_f64s(
     ptr: *mut Biski64,
     out: *mut f64,
     count: usize,
@@ -103,8 +102,8 @@ pub extern "C" fn biski64_rand_f64s(
     max: f64,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         let seed = rng.nextu();
 
         buffer
@@ -123,25 +122,29 @@ pub extern "C" fn biski64_rand_f64s(
 
 const STRIDE: u64 = 0x9E3779B97F4A7C15;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
     use super::{STRIDE, SplitMix64};
     use crate::prng::b64::biski::Biski64x8;
     use crate::rng::Rng;
     use rayon::prelude::*;
     use std::arch::x86_64::*;
-    use std::slice::from_raw_parts_mut;
+    
 
     #[unsafe(no_mangle)]
     pub extern "C" fn biski64x8_new(seed: u64) -> *mut Biski64x8 {
-        Box::into_raw(Box::new(Biski64x8::new(seed)))
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
+        unsafe { Box::into_raw(Box::new(Biski64x8::new(seed))) }
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn biski64x8_free(ptr: *mut Biski64x8) {
+    pub unsafe extern "C" fn biski64x8_free(ptr: *mut Biski64x8) {
         if !ptr.is_null() {
             unsafe { drop(Box::from_raw(ptr)) };
         }
@@ -270,7 +273,11 @@ mod simd {
                 *v = tmp[i];
             }
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     /// Converts 8 u64 (as __m512i) to f64 [0, 1) via bit-manipulation.
     /// Uses top-53-bit trick: shift right 11, set exponent to 0x3FF, subtract 1.0.
@@ -641,16 +648,16 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn biski64x8_next_u64s(ptr: *mut Biski64x8, out: *mut u64, count: usize) {
+    pub unsafe extern "C" fn biski64x8_next_u64s(ptr: *mut Biski64x8, out: *mut u64, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let vals = rng.nextu();
             let seed = vals.iter().copied().fold(0, u64::wrapping_add);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(BISKI64X8_PAR_CHUNK)
                 .enumerate()
@@ -669,16 +676,16 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn biski64x8_next_f64s(ptr: *mut Biski64x8, out: *mut f64, count: usize) {
+    pub unsafe extern "C" fn biski64x8_next_f64s(ptr: *mut Biski64x8, out: *mut f64, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let vals = rng.nextu();
             let seed = vals.iter().copied().fold(0, u64::wrapping_add);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(BISKI64X8_PAR_CHUNK)
                 .enumerate()
@@ -697,7 +704,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn biski64x8_rand_i64s(
+    pub unsafe extern "C" fn biski64x8_rand_i64s(
         ptr: *mut Biski64x8,
         out: *mut i64,
         count: usize,
@@ -708,11 +715,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let vals = rng.nextu();
             let seed = vals.iter().copied().fold(0, u64::wrapping_add);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(BISKI64X8_PAR_CHUNK)
                 .enumerate()
@@ -733,7 +740,7 @@ mod simd {
     }
 
     #[unsafe(no_mangle)]
-    pub extern "C" fn biski64x8_rand_f64s(
+    pub unsafe extern "C" fn biski64x8_rand_f64s(
         ptr: *mut Biski64x8,
         out: *mut f64,
         count: usize,
@@ -744,11 +751,11 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let vals = rng.nextu();
             let seed = vals.iter().copied().fold(0, u64::wrapping_add);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(BISKI64X8_PAR_CHUNK)
                 .enumerate()

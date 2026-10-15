@@ -1,4 +1,3 @@
-use std::slice::from_raw_parts_mut;
 
 use crate::prng::b32::Pcg32;
 use crate::rng::Rng;
@@ -12,7 +11,7 @@ pub extern "C" fn pcg32_new(seed: u32) -> *mut Pcg32 {
 
 /// Frees the memory of a `Pcg32` instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn pcg32_free(ptr: *mut Pcg32) {
+pub unsafe extern "C" fn pcg32_free(ptr: *mut Pcg32) {
     if !ptr.is_null() {
         unsafe {
             let _ = Box::from_raw(ptr);
@@ -22,27 +21,27 @@ pub extern "C" fn pcg32_free(ptr: *mut Pcg32) {
 
 /// Fills the output buffer with the next random `u32` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn pcg32_next_u32s(ptr: *mut Pcg32, out: *mut u32, count: usize) {
+pub unsafe extern "C" fn pcg32_next_u32s(ptr: *mut Pcg32, out: *mut u32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Pcg32::new, |r| r.nextu());
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
-pub extern "C" fn pcg32_next_f32s(ptr: *mut Pcg32, out: *mut f32, count: usize) {
+pub unsafe extern "C" fn pcg32_next_f32s(ptr: *mut Pcg32, out: *mut f32, count: usize) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Pcg32::new, |r| r.nextf());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
 #[unsafe(no_mangle)]
-pub extern "C" fn pcg32_rand_i32s(
+pub unsafe extern "C" fn pcg32_rand_i32s(
     ptr: *mut Pcg32,
     out: *mut i32,
     count: usize,
@@ -50,15 +49,15 @@ pub extern "C" fn pcg32_rand_i32s(
     max: i32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Pcg32::new, |r| r.randi(min, max));
     }
 }
 
 /// Fills the output buffer with random `f32` values in the range [min, max).
 #[unsafe(no_mangle)]
-pub extern "C" fn pcg32_rand_f32s(
+pub unsafe extern "C" fn pcg32_rand_f32s(
     ptr: *mut Pcg32,
     out: *mut f32,
     count: usize,
@@ -66,18 +65,18 @@ pub extern "C" fn pcg32_rand_f32s(
     max: f32,
 ) {
     unsafe {
-        let rng = &mut *ptr;
-        let buffer = from_raw_parts_mut(out, count);
+        let Some(rng) = ptr.as_mut() else { return };
+        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Pcg32::new, |r| r.randf(min, max));
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
-    use super::*;
+    
     use crate::{i2f_bits, u2f_01};
 
     use crate::prng::b32::{
@@ -188,7 +187,11 @@ mod simd {
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut __m256i, out256);
             final_rem.copy_from_slice(&tmp[..final_rem.len()]);
         }
-    }
+        // Non-temporal stores must be fenced on the issuing thread before the data is
+    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
+    #[allow(unused_unsafe)]
+    unsafe { ::core::arch::x86_64::_mm_sfence() };
+}
 
     #[cfg(target_arch = "x86_64")]
     #[allow(unsafe_op_in_unsafe_fn)]
@@ -353,12 +356,16 @@ mod simd {
     /// The caller is responsible for freeing the memory using `pcg32x8_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn pcg32x8_new(seed: u32) -> *mut Pcg32x8 {
+        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+            return std::ptr::null_mut(); // CPU lacks the required features
+        }
+        // SAFETY: the required CPU features were verified above.
         unsafe { Box::into_raw(Box::new(Pcg32x8::new(seed))) }
     }
 
     /// Frees the memory of a `Pcg32x8` instance.
     #[unsafe(no_mangle)]
-    pub extern "C" fn pcg32x8_free(ptr: *mut Pcg32x8) {
+    pub unsafe extern "C" fn pcg32x8_free(ptr: *mut Pcg32x8) {
         if !ptr.is_null() {
             unsafe {
                 let _ = Box::from_raw(ptr);
@@ -368,12 +375,12 @@ mod simd {
 
     /// Fills the output buffer with the next random `u32` values.
     #[unsafe(no_mangle)]
-    pub extern "C" fn pcg32x8_next_u32s(ptr: *mut Pcg32x8, out: *mut u32, count: usize) {
+    pub unsafe extern "C" fn pcg32x8_next_u32s(ptr: *mut Pcg32x8, out: *mut u32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut state0 = [0u64; PCG32X8_LANE];
             let mut inc0 = [0u64; PCG32X8_LANE];
             _mm512_storeu_si512(state0.as_mut_ptr() as *mut _, rng.state);
@@ -384,7 +391,7 @@ mod simd {
             let mask32 = _mm512_set1_epi64(0xFFFFFFFF_i64);
             let chunk_starts = pcg32x8_chunk_starts(count, state0, inc0);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(PCG32X8_PAR_CHUNK)
                 .zip(chunk_starts.into_par_iter())
@@ -400,12 +407,12 @@ mod simd {
 
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     #[unsafe(no_mangle)]
-    pub extern "C" fn pcg32x8_next_f32s(ptr: *mut Pcg32x8, out: *mut f32, count: usize) {
+    pub unsafe extern "C" fn pcg32x8_next_f32s(ptr: *mut Pcg32x8, out: *mut f32, count: usize) {
         if count == 0 {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut state0 = [0u64; PCG32X8_LANE];
             let mut inc0 = [0u64; PCG32X8_LANE];
             _mm512_storeu_si512(state0.as_mut_ptr() as *mut _, rng.state);
@@ -416,7 +423,7 @@ mod simd {
             let mask32 = _mm512_set1_epi64(0xFFFFFFFF_i64);
             let chunk_starts = pcg32x8_chunk_starts(count, state0, inc0);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(PCG32X8_PAR_CHUNK)
@@ -440,7 +447,7 @@ mod simd {
 
     /// Fills the output buffer with random `i32` values in the range [min, max].
     #[unsafe(no_mangle)]
-    pub extern "C" fn pcg32x8_rand_i32s(
+    pub unsafe extern "C" fn pcg32x8_rand_i32s(
         ptr: *mut Pcg32x8,
         out: *mut i32,
         count: usize,
@@ -451,7 +458,7 @@ mod simd {
             return;
         }
         unsafe {
-            let rng = &mut *ptr;
+            let Some(rng) = ptr.as_mut() else { return };
             let mut state0 = [0u64; PCG32X8_LANE];
             let mut inc0 = [0u64; PCG32X8_LANE];
             _mm512_storeu_si512(state0.as_mut_ptr() as *mut _, rng.state);
@@ -463,7 +470,7 @@ mod simd {
             let range = (max as i64 - min as i64 + 1) as u64;
             let chunk_starts = pcg32x8_chunk_starts(count, state0, inc0);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(PCG32X8_PAR_CHUNK)
@@ -489,7 +496,7 @@ mod simd {
 
     /// Fills the output buffer with random `f32` values in the range [min, max).
     #[unsafe(no_mangle)]
-    pub extern "C" fn pcg32x8_rand_f32s(
+    pub unsafe extern "C" fn pcg32x8_rand_f32s(
         ptr: *mut Pcg32x8,
         out: *mut f32,
         count: usize,
@@ -500,7 +507,7 @@ mod simd {
             return;
         }
 
-        let rng = unsafe { &mut *ptr };
+        let Some(rng) = (unsafe { ptr.as_mut() }) else { return };
         let mut state0 = [0u64; PCG32X8_LANE];
         let mut inc0 = [0u64; PCG32X8_LANE];
 
@@ -514,7 +521,7 @@ mod simd {
             let scale = max - min;
             let chunk_starts = pcg32x8_chunk_starts(count, state0, inc0);
 
-            let buffer = from_raw_parts_mut(out, count);
+            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
 
             buffer
                 .par_chunks_mut(PCG32X8_PAR_CHUNK)

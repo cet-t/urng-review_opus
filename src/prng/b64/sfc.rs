@@ -52,10 +52,10 @@ impl Rng for Sfc64 {
     }
 }
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub use simd::*;
 
-#[cfg(feature = "simd")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub mod simd {
     use std::arch::x86_64::*;
 
@@ -64,13 +64,15 @@ pub mod simd {
 
     // --- Sfc64x4 (AVX2) ---
 
-    /// A 4-way SIMD SFC64 generator using AVX2 256-bit intrinsics.
+    /// An 8-way SIMD SFC64 generator using AVX-512F (lane i = scalar Sfc64 seeded
+    /// with SplitMix64 outputs 3i, 3i+1, 3i+2).
     ///
     /// # Example
     /// ```no_run
     /// use urng::Sfc64x8;
     ///
-    /// let mut rng = Sfc64x8::new(0);
+    /// if !std::arch::is_x86_feature_detected!("avx512f") { return; }
+    /// let mut rng = unsafe { Sfc64x8::new(0) };
     /// let _ = unsafe { rng.nextu() };
     /// ```
     #[cfg(all(feature = "simd", target_arch = "x86_64"))]
@@ -87,8 +89,10 @@ pub mod simd {
         /// Creates a new `Sfc64x8` from 8 independent seeds.
         ///
         /// # Safety
-        /// Requires AVX512 support (guaranteed by `target-cpu=native` on modern x86_64).
-        #[inline(always)]
+        /// The CPU must support AVX-512F (this is a `#[target_feature]` constructor,
+        /// so calling it from ordinary code requires `unsafe`).
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub fn new(seed: u64) -> Self {
             let mut a = [0u64; 8];
             let mut b = [0u64; 8];
@@ -109,12 +113,12 @@ pub mod simd {
             }
         }
 
-        /// Generates 4 random `u64` values simultaneously and writes them to `out`.
+        /// Generates 8 random `u64` values (one per lane).
         ///
         /// # Safety
-        /// `out` must point to a valid buffer of at least 8 `u64` values.
-        /// Requires AVX512 support.
-        #[inline(always)]
+                /// Requires AVX512 support.
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn nextu(&mut self) -> [u64; 8] {
             unsafe {
                 let one = _mm512_set1_epi64(1);
@@ -146,7 +150,8 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn nextf(&mut self) -> [f64; 8] {
             unsafe {
                 let u = self.nextu();
@@ -163,16 +168,12 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn randi(&mut self, min: i64, max: i64) -> [i64; 8] {
             unsafe {
                 let u = self.nextu();
-                let range = (max as i128 - min as i128 + 1) as u128;
-                let mut out = [0i64; 8];
-                for i in 0..8 {
-                    out[i] = ((u[i] as u128 * range) >> 64) as i64 + min;
-                }
-                out
+                u.map(|w| crate::rng::Word::to_randi(w, min, max))
             }
         }
 
@@ -181,16 +182,12 @@ pub mod simd {
         /// # Safety
         ///
         /// The caller must ensure the CPU supports the `avx512f` target feature.
-        #[inline(always)]
+        #[inline]
+        #[target_feature(enable = "avx512f")]
         pub unsafe fn randf(&mut self, min: f64, max: f64) -> [f64; 8] {
             unsafe {
                 let u = self.nextu();
-                let range = max - min;
-                let mut out = [0f64; 8];
-                for i in 0..8 {
-                    out[i] = u2f_01!(f64, 64, u[i]) * range + min;
-                }
-                out
+                u.map(|w| crate::rng::Word::to_randf(w, min, max))
             }
         }
     }
@@ -254,7 +251,7 @@ mod tests {
 
 impl Sfc64 {
     /// Builds the generator from a raw `(a, b, c, counter)` state (test helper).
-    #[cfg(test)]
+    #[cfg(all(test, feature = "cabi"))]
     pub(crate) fn from_state(s: [u64; 4]) -> Self {
         Self { a: wrap!(s[0]), b: wrap!(s[1]), c: wrap!(s[2]), counter: wrap!(s[3]) }
     }
