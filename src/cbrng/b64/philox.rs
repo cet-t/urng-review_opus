@@ -100,7 +100,7 @@ impl_ring_rng64!(Philox64, 2, next_raw);
 ///
 /// This is a counter-based RNG suitable for parallel applications. Implements
 /// [`Rng`] directly: each call to [`Rng::nextu`] hands out one `u64` from
-/// an internal 4-word buffer, recomputing a fresh block every 2nd call.
+/// an internal 4-word buffer, recomputing a fresh block every 4th call.
 ///
 /// # Examples
 ///
@@ -126,7 +126,9 @@ impl Philox4x64 {
             c: wrap![3, 2, 1, 0],
             k: wrap![seedgen.nextu_const(), seedgen.nextu_const()],
             buf: wrap![0; 4],
-            pos: wrap!(2),
+            // must equal the buffer length so the first call computes a block
+            // (it was 2, so the first two outputs were the zero-filled buffer)
+            pos: wrap!(4),
         }
     }
 
@@ -207,5 +209,36 @@ mod tests {
     crate::safe_test! {
         Philox64,
         Philox4x64
+    }
+
+    /// Random123 known-answer tests (kat_vectors, philox2x64_10 / philox4x64_10).
+    #[test]
+    fn philox_random123_kats() {
+        let z = Philox64::compute(wrap![0, 0], wrap![0, 0]).map(|w| *w);
+        assert_eq!(z, [0xca00a0459843d731, 0x66c24222c9a845b5]);
+        let z = Philox4x64::compute(wrap![0; 4], wrap![0; 2]).map(|w| *w);
+        assert_eq!(
+            z,
+            [0x16554d9eca36314c, 0xdb20fe9d672d0fdc, 0xd7e772cee186176b, 0x7e68b68aec7ba23b]
+        );
+        // independent reference agrees on non-trivial inputs
+        let c = [1u64, 2, 3, 4];
+        let k = [0xdeadbeef, 0x12345678];
+        assert_eq!(
+            Philox4x64::compute(wrap![1, 2, 3, 4], wrap![0xdeadbeef, 0x12345678]).map(|w| *w),
+            crate::_reftest::philox4x64_10(c, k)
+        );
+    }
+
+    /// REVIEW B11: `Philox4x64::new` started with `pos = 2`, so the first two
+    /// outputs were the zero-filled buffer.
+    #[test]
+    fn philox4x64_first_outputs_come_from_the_first_block() {
+        for seed in [0u64, 1, 123, u64::MAX] {
+            let mut r = Philox4x64::new(seed);
+            let expect = Philox4x64::compute(r.c, r.k).map(|w| *w);
+            let got = [r.nextu(), r.nextu(), r.nextu(), r.nextu()];
+            assert_eq!(got, expect, "seed {seed}");
+        }
     }
 }

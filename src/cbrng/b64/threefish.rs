@@ -80,7 +80,8 @@ impl Threefish256 {
             tw: [tw0, tw1, tw0 ^ tw1],
             index: wrap!(4),
             buf: wrap![0; 4],
-            pos: wrap!(0),
+            // must equal the buffer length (it was 0: the first four outputs were 0)
+            pos: wrap!(4),
         }
     }
 
@@ -176,4 +177,53 @@ mod tests {
     use super::*;
 
     crate::safe_test! { Threefish256 }
+
+    fn with_key(key: [u64; 4], tweak: [u64; 2]) -> Threefish256 {
+        let mut k = wrap![0u64; 5];
+        for i in 0..4 {
+            k[i] = wrap!(key[i]);
+        }
+        k[4] = k[0] ^ k[1] ^ k[2] ^ k[3] ^ THREEFISH_C240;
+        let (t0, t1) = (wrap!(tweak[0]), wrap!(tweak[1]));
+        Threefish256 {
+            c: wrap![0; 4],
+            k,
+            tw: [t0, t1, t0 ^ t1],
+            index: wrap!(4),
+            buf: wrap![0; 4],
+            pos: wrap!(4),
+        }
+    }
+
+    /// Skein 1.3 Threefish-256 KAT (key = tweak = plaintext = 0). The generator
+    /// outputs E(ctr) XOR ctr, which equals E(0) for the first block.
+    #[test]
+    fn threefish256_skein_kat_and_reference() {
+        let mut g = with_key([0; 4], [0; 2]);
+        let block: Vec<u64> = (0..4).map(|_| g.nextu()).collect();
+        assert_eq!(
+            block,
+            [0x94EEEA8B1F2ADA84, 0xADF103313EAE6670, 0x952419A1F4B16D53, 0xD83F13E63C9F6B11]
+        );
+        let key = [1, 2, 3, 4];
+        let tweak = [5, 6];
+        let mut g = with_key(key, tweak);
+        for ctr in 0..8u64 {
+            let mut want = crate::_reftest::threefish256(key, tweak, [ctr, 0, 0, 0]);
+            want[0] ^= ctr;
+            let got: Vec<u64> = (0..4).map(|_| g.nextu()).collect();
+            assert_eq!(got, want, "ctr {ctr}");
+        }
+    }
+
+    /// REVIEW B11: `Threefish256::new` started with `pos = 0`, so the first four
+    /// outputs were always 0.
+    #[test]
+    fn threefish256_first_outputs_are_not_the_zero_buffer() {
+        for seed in [0u64, 1, 123] {
+            let mut g = Threefish256::new(seed);
+            let first: Vec<u64> = (0..4).map(|_| g.nextu()).collect();
+            assert!(first.iter().any(|&v| v != 0), "seed {seed}: {first:x?}");
+        }
+    }
 }
