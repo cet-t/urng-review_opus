@@ -13,10 +13,7 @@ pub use squares::Squares32x8;
 pub use threefry::{Threefry32x2, Threefry32x4};
 
 #[cfg(all(feature = "cabi", feature = "simd", target_arch = "x86_64"))]
-pub(crate) use philox::{
-    PHILOX32x4x4_CHUNK_RATIO, PHILOX32x4x4_PAR_CHUNK, PHILOX32x4x4_SHIFT, PHILOX32x16,
-    PHILOX32x16_SHIFT,
-};
+pub(crate) use philox::PHILOX32x16;
 #[cfg(all(feature = "cabi", feature = "simd", target_arch = "x86_64"))]
 pub(crate) use squares::SQUARES32x8;
 

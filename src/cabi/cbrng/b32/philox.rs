@@ -1,9 +1,22 @@
+//! C ABI for [`Philox32`] and [`Philox32x4x4`].
+//!
+//! Contract (REVIEW B12/B14): a bulk call writes exactly what the same number
+//! of sequential Rust calls would produce, independent of the buffer address
+//! and of thread scheduling.
+//!
+//! - `philox32_*`: `count` successive [`Rng::nextu`] words, including words
+//!   still buffered from an earlier call, so bulk and single draws interleave.
+//! - `philox32x4x4_*`: the concatenation of successive 16-word
+//!   `Philox32x4x4::nextu` blocks; the unused tail of a final partial block is
+//!   discarded (the state advances by `ceil(count / 16)` blocks).
+//! - `*_rand_i32s` with `min > max` writes nothing and leaves the state
+//!   unchanged (a Rust panic cannot cross the C boundary).
 
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
+use wrapn::wrap;
 
+use crate::_internal::{CtrRing, par_fill_ctr};
 use crate::cbrng::b32::Philox32;
-use crate::{i2f_bits, u2f_01w};
+use crate::rng::Word;
 
 /// Creates a new `Philox32` instance.
 /// The caller is responsible for freeing the memory using `philox32_free`.
@@ -16,148 +29,50 @@ pub extern "C" fn philox32_new(seed: u32) -> *mut Philox32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn philox32_free(ptr: *mut Philox32) {
     if !ptr.is_null() {
-        unsafe {
-            let _ = Box::from_raw(ptr);
-        }
+        unsafe { drop(Box::from_raw(ptr)) };
     }
 }
 
-const PHILOX32_PAR_CHUNK: usize = 4096;
-
+impl CtrRing for Philox32 {
+    const N: usize = 4;
+    fn buffered(&self) -> bool {
+        *self.pos < 4
+    }
+    fn ctr(&self) -> u128 {
+        self.c.iter().rev().fold(0u128, |acc, w| (acc << 32) | **w as u128)
+    }
+    fn set_ctr(&mut self, c: u128) {
+        self.c = wrap![c as u32, (c >> 32) as u32, (c >> 64) as u32, (c >> 96) as u32];
+    }
+    fn block(&self, c: u128, out: &mut [u32]) {
+        let ctr = wrap![c as u32, (c >> 32) as u32, (c >> 64) as u32, (c >> 96) as u32];
+        for (o, w) in out.iter_mut().zip(Philox32::compute(ctr, self.k)) {
+            *o = *w;
+        }
+    }
+}
 /// Fills the output buffer with the next random `u32` values.
-/// This function uses parallel processing for large counts.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn philox32_next_u32s(ptr: *mut Philox32, out: *mut u32, count: usize) {
-    if count == 0 {
-        return;
-    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        let c0 = rng.c;
-        let k = rng.k;
-
-        buffer
-            .par_chunks_mut(PHILOX32_PAR_CHUNK)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let chunk_base_block = (chunk_idx * PHILOX32_PAR_CHUNK) / 4;
-                let mut chunks_exact = chunk.chunks_exact_mut(4);
-                let mut b_offset = 0u32;
-
-                for dst in chunks_exact.by_ref() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k).map(|x| *x);
-                    dst[0] = result[0];
-                    dst[1] = result[1];
-                    dst[2] = result[2];
-                    dst[3] = result[3];
-                    b_offset += 1;
-                }
-
-                let rem = chunks_exact.into_remainder();
-                if !rem.is_empty() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k).map(|x| *x);
-                    rem.copy_from_slice(&result[..rem.len()]);
-                }
-            });
-
-        let num_blocks = count.div_ceil(4);
-        let (n_c0, overflow) = rng.c[0].overflowing_add(num_blocks as u32);
-        rng.c[0] = n_c0.into();
-        if overflow {
-            let (n_c1, ovf2) = rng.c[1].overflowing_add(1);
-            rng.c[1] = n_c1.into();
-            if ovf2 {
-                rng.c[2] += 1;
-            }
-        }
+        let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+        par_fill_ctr(rng, buf, |x| x);
     }
 }
 
 /// Fills the output buffer with the next random `f32` values in the range [0, 1).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn philox32_next_f32s(ptr: *mut Philox32, out: *mut f32, count: usize) {
-    if count == 0 {
-        return;
-    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        let c0 = rng.c;
-        let k = rng.k;
-
-        buffer
-            .par_chunks_mut(PHILOX32_PAR_CHUNK)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let chunk_base_block = (chunk_idx * PHILOX32_PAR_CHUNK) >> 2;
-                let mut chunks_exact = chunk.chunks_exact_mut(4);
-                let mut b_offset = 0u32;
-
-                for dst in chunks_exact.by_ref() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k);
-                    dst[0] = *u2f_01w!(f32, 32, result[0]);
-                    dst[1] = *u2f_01w!(f32, 32, result[1]);
-                    dst[2] = *u2f_01w!(f32, 32, result[2]);
-                    dst[3] = *u2f_01w!(f32, 32, result[3]);
-                    b_offset += 1;
-                }
-
-                let rem = chunks_exact.into_remainder();
-                if !rem.is_empty() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k);
-                    for j in 0..rem.len() {
-                        rem[j] = *u2f_01w!(f32, 32, result[j]);
-                    }
-                }
-            });
-
-        let num_blocks = count.div_ceil(4);
-        let (n_c0, overflow) = rng.c[0].overflowing_add(num_blocks as u32);
-        rng.c[0] = n_c0.into();
-        if overflow {
-            let (n_c1, ovf2) = rng.c[1].overflowing_add(1);
-            rng.c[1] = n_c1.into();
-            if ovf2 {
-                rng.c[2] += 1;
-            }
-        }
+        let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+        par_fill_ctr(rng, buf, |x| x.to_f01());
     }
 }
 
 /// Fills the output buffer with random `i32` values in the range [min, max].
+/// Writes nothing if `min > max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn philox32_rand_i32s(
     ptr: *mut Philox32,
@@ -166,70 +81,13 @@ pub unsafe extern "C" fn philox32_rand_i32s(
     min: i32,
     max: i32,
 ) {
-    if count == 0 {
+    if min > max {
         return;
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        let c0 = rng.c;
-        let k = rng.k;
-        let range = (max as i64 - min as i64 + 1) as u64;
-
-        buffer
-            .par_chunks_mut(PHILOX32_PAR_CHUNK)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let chunk_base_block = (chunk_idx * PHILOX32_PAR_CHUNK) >> 2;
-                let mut chunks_exact = chunk.chunks_exact_mut(4);
-                let mut b_offset = 0u32;
-
-                for dst in chunks_exact.by_ref() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k)
-                        .map(|x| ((x.cast::<u64>() * range) >> 32).cast::<i32>() + min);
-                    dst[0] = *result[0];
-                    dst[1] = *result[1];
-                    dst[2] = *result[2];
-                    dst[3] = *result[3];
-                    b_offset += 1;
-                }
-
-                let rem = chunks_exact.into_remainder();
-                if !rem.is_empty() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k)
-                        .map(|x| ((x.cast::<u64>() * range) >> 32).cast::<i32>() + min);
-                    for j in 0..rem.len() {
-                        rem[j] = *result[j];
-                    }
-                }
-            });
-
-        let num_blocks = count.div_ceil(4);
-        let (n_c0, overflow) = rng.c[0].overflowing_add(num_blocks as u32);
-        rng.c[0] = n_c0.into();
-        if overflow {
-            let (n_c1, ovf2) = rng.c[1].overflowing_add(1);
-            rng.c[1] = n_c1.into();
-            if ovf2 {
-                rng.c[2] += 1;
-            }
-        }
+        let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+        par_fill_ctr(rng, buf, |x| x.to_randi(min, max));
     }
 }
 
@@ -242,69 +100,10 @@ pub unsafe extern "C" fn philox32_rand_f32s(
     min: f32,
     max: f32,
 ) {
-    if count == 0 {
-        return;
-    }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        let c0 = rng.c;
-        let k = rng.k;
-        let range_val = max - min;
-
-        buffer
-            .par_chunks_mut(PHILOX32_PAR_CHUNK)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let chunk_base_block = (chunk_idx * PHILOX32_PAR_CHUNK) / 4;
-                let mut chunks_exact = chunk.chunks_exact_mut(4);
-                let mut b_offset = 0u32;
-
-                for dst in chunks_exact.by_ref() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result =
-                        Philox32::compute(c, k).map(|x| u2f_01w!(f32, 32, x) * range_val + min);
-                    dst[0] = *result[0];
-                    dst[1] = *result[1];
-                    dst[2] = *result[2];
-                    dst[3] = *result[3];
-                    b_offset += 1;
-                }
-
-                let rem = chunks_exact.into_remainder();
-                if !rem.is_empty() {
-                    let mut c = c0;
-                    let (new_c0, overflow) =
-                        c[0].overflowing_add((chunk_base_block as u32) + b_offset);
-                    c[0] = new_c0.into();
-                    if overflow {
-                        c[1] += 1;
-                    }
-
-                    let result = Philox32::compute(c, k);
-                    for j in 0..rem.len() {
-                        rem[j] = *u2f_01w!(f32, 32, result[j]) * range_val + min;
-                    }
-                }
-            });
-
-        let num_blocks = count.div_ceil(4);
-        let (n_c0, overflow) = rng.c[0].overflowing_add(num_blocks as u32);
-        rng.c[0] = n_c0.into();
-        if overflow {
-            let (n_c1, ovf2) = rng.c[1].overflowing_add(1);
-            rng.c[1] = n_c1.into();
-            if ovf2 {
-                rng.c[2] += 1;
-            }
-        }
+        let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+        par_fill_ctr(rng, buf, |x| x.to_randf(min, max));
     }
 }
 
@@ -313,54 +112,24 @@ pub use simd::*;
 
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
-    use crate::cbrng::b32::{
-        PHILOX32x4x4_CHUNK_RATIO, PHILOX32x4x4_PAR_CHUNK, PHILOX32x4x4_SHIFT, PHILOX32x16,
-        PHILOX32x16_SHIFT, Philox32x4x4,
-    };
-    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-    use rayon::slice::ParallelSliceMut;
+    use rayon::prelude::*;
     use std::arch::x86_64::*;
-    use std::slice::from_raw_parts_mut;
 
-    #[cfg(target_arch = "x86_64")]
-    #[inline]
-    #[target_feature(enable = "avx512f")]
-    fn philox32x4x4_compute_vec(
-        mut x: __m512i,
-        mut key: __m512i,
-        m: __m512i,
-        w: __m512i,
-    ) -> __m512i {
-        macro_rules! round {
-            () => {{
-                let prod = _mm512_mul_epu32(x, m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64(x, 32);
-                x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, key));
-                key = _mm512_add_epi32(key, w);
-            }};
-        }
+    use crate::_internal::{fill_chunk_auto, prefer_nt};
+    use crate::cbrng::b32::{PHILOX32x16, Philox32x4x4};
+    use crate::rng::Word;
 
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
-        round!();
+    /// Elements per parallel task (a multiple of the 64-word batch).
+    const PAR_CHUNK: usize = 0x20000;
+    /// Blocks (16 words each) generated per batch: four independent Philox
+    /// evaluations keep the multiplier pipeline busy.
+    const BATCH: usize = 4 * PHILOX32x16;
 
-        let _ = key;
-        x
-    }
-
-    /// Creates a new `Philox32x4x4` instance.
-    /// The caller is responsible for freeing the memory using `philox32x4x4_free`.
+    /// Creates a new `Philox32x4x4` instance, or returns NULL if the CPU lacks
+    /// AVX-512F. The caller frees it with `philox32x4x4_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn philox32x4x4_new(seed: u32) -> *mut Philox32x4x4 {
-        if !(std::arch::is_x86_feature_detected!("avx512f")) {
+        if !std::arch::is_x86_feature_detected!("avx512f") {
             return std::ptr::null_mut(); // CPU lacks the required features
         }
         // SAFETY: the required CPU features were verified above.
@@ -375,632 +144,87 @@ mod simd {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
+    /// Fills one parallel chunk starting at block counter `c`.
     #[target_feature(enable = "avx512f")]
-    #[allow(unsafe_op_in_unsafe_fn)]
-    #[allow(unused_assignments)]
-    unsafe fn philox32x4x4_next_u32s_chunk(
-        chunk_idx: usize,
-        chunk: &mut [u32],
-        c: __m512i,
-        k: __m512i,
-        one: __m512i,
-    ) {
-        // 8-way interleaved Philox rounds: issue 8 multiplies to fully hide
-        // the 5-cycle mul latency, then complete shuffle/xor/key-advance per block.
-        macro_rules! round8 {
-            ($x0:ident, $k0:ident, $x1:ident, $k1:ident,
-         $x2:ident, $k2:ident, $x3:ident, $k3:ident,
-         $x4:ident, $k4:ident, $x5:ident, $k5:ident,
-         $x6:ident, $k6:ident, $x7:ident, $k7:ident, $m:ident, $w:ident) => {{
-                let p0 = _mm512_mul_epu32($x0, $m);
-                let p1 = _mm512_mul_epu32($x1, $m);
-                let p2 = _mm512_mul_epu32($x2, $m);
-                let p3 = _mm512_mul_epu32($x3, $m);
-                let p4 = _mm512_mul_epu32($x4, $m);
-                let p5 = _mm512_mul_epu32($x5, $m);
-                let p6 = _mm512_mul_epu32($x6, $m);
-                let p7 = _mm512_mul_epu32($x7, $m);
-
-                let s0 = _mm512_shuffle_epi32(p0, 0x1B);
-                let xs0 = _mm512_srli_epi64($x0, 32);
-                $x0 = _mm512_xor_epi32(s0, _mm512_xor_epi32(xs0, $k0));
-                $k0 = _mm512_add_epi32($k0, $w);
-
-                let s1 = _mm512_shuffle_epi32(p1, 0x1B);
-                let xs1 = _mm512_srli_epi64($x1, 32);
-                $x1 = _mm512_xor_epi32(s1, _mm512_xor_epi32(xs1, $k1));
-                $k1 = _mm512_add_epi32($k1, $w);
-
-                let s2 = _mm512_shuffle_epi32(p2, 0x1B);
-                let xs2 = _mm512_srli_epi64($x2, 32);
-                $x2 = _mm512_xor_epi32(s2, _mm512_xor_epi32(xs2, $k2));
-                $k2 = _mm512_add_epi32($k2, $w);
-
-                let s3 = _mm512_shuffle_epi32(p3, 0x1B);
-                let xs3 = _mm512_srli_epi64($x3, 32);
-                $x3 = _mm512_xor_epi32(s3, _mm512_xor_epi32(xs3, $k3));
-                $k3 = _mm512_add_epi32($k3, $w);
-
-                let s4 = _mm512_shuffle_epi32(p4, 0x1B);
-                let xs4 = _mm512_srli_epi64($x4, 32);
-                $x4 = _mm512_xor_epi32(s4, _mm512_xor_epi32(xs4, $k4));
-                $k4 = _mm512_add_epi32($k4, $w);
-
-                let s5 = _mm512_shuffle_epi32(p5, 0x1B);
-                let xs5 = _mm512_srli_epi64($x5, 32);
-                $x5 = _mm512_xor_epi32(s5, _mm512_xor_epi32(xs5, $k5));
-                $k5 = _mm512_add_epi32($k5, $w);
-
-                let s6 = _mm512_shuffle_epi32(p6, 0x1B);
-                let xs6 = _mm512_srli_epi64($x6, 32);
-                $x6 = _mm512_xor_epi32(s6, _mm512_xor_epi32(xs6, $k6));
-                $k6 = _mm512_add_epi32($k6, $w);
-
-                let s7 = _mm512_shuffle_epi32(p7, 0x1B);
-                let xs7 = _mm512_srli_epi64($x7, 32);
-                $x7 = _mm512_xor_epi32(s7, _mm512_xor_epi32(xs7, $k7));
-                $k7 = _mm512_add_epi32($k7, $w);
-            }};
-        }
-
-        macro_rules! round4 {
-            ($x0:ident, $k0:ident, $x1:ident, $k1:ident,
-         $x2:ident, $k2:ident, $x3:ident, $k3:ident, $m:ident, $w:ident) => {{
-                let p0 = _mm512_mul_epu32($x0, $m);
-                let p1 = _mm512_mul_epu32($x1, $m);
-                let p2 = _mm512_mul_epu32($x2, $m);
-                let p3 = _mm512_mul_epu32($x3, $m);
-
-                let s0 = _mm512_shuffle_epi32(p0, 0x1B);
-                let xs0 = _mm512_srli_epi64($x0, 32);
-                $x0 = _mm512_xor_epi32(s0, _mm512_xor_epi32(xs0, $k0));
-                $k0 = _mm512_add_epi32($k0, $w);
-
-                let s1 = _mm512_shuffle_epi32(p1, 0x1B);
-                let xs1 = _mm512_srli_epi64($x1, 32);
-                $x1 = _mm512_xor_epi32(s1, _mm512_xor_epi32(xs1, $k1));
-                $k1 = _mm512_add_epi32($k1, $w);
-
-                let s2 = _mm512_shuffle_epi32(p2, 0x1B);
-                let xs2 = _mm512_srli_epi64($x2, 32);
-                $x2 = _mm512_xor_epi32(s2, _mm512_xor_epi32(xs2, $k2));
-                $k2 = _mm512_add_epi32($k2, $w);
-
-                let s3 = _mm512_shuffle_epi32(p3, 0x1B);
-                let xs3 = _mm512_srli_epi64($x3, 32);
-                $x3 = _mm512_xor_epi32(s3, _mm512_xor_epi32(xs3, $k3));
-                $k3 = _mm512_add_epi32($k3, $w);
-            }};
-        }
-
-        macro_rules! philox10_single {
-            ($x:ident, $key:ident, $m:ident, $w:ident) => {{
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-                $key = _mm512_add_epi32($key, $w);
-
-                let prod = _mm512_mul_epu32($x, $m);
-                let shuf = _mm512_shuffle_epi32(prod, 0x1B);
-                let x_shift = _mm512_srli_epi64($x, 32);
-                $x = _mm512_xor_epi32(shuf, _mm512_xor_epi32(x_shift, $key));
-            }};
-        }
-
-        let m = _mm512_set1_epi64(0xCD9E8D57_D2511F53u64 as i64);
-        let w = _mm512_set1_epi64(0xBB67AE85_9E3779B9u64 as i64);
-        let offset = (chunk_idx as u128) << PHILOX32x4x4_SHIFT;
-
-        let mut c_array = [0u128; 4];
-        unsafe { _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, c) };
-        for item in &mut c_array {
-            *item = item.wrapping_add(offset);
-        }
-        let mut c = unsafe { _mm512_loadu_si512(c_array.as_ptr() as *const _) };
-
-        // Counter step vectors (carry-free: 64-bit lower counter won't overflow)
-        let two = _mm512_set1_epi64(2);
-        let three = _mm512_set1_epi64(3);
-        let four = _mm512_set1_epi64(4);
-        let five = _mm512_set1_epi64(5);
-        let six = _mm512_set1_epi64(6);
-        let seven = _mm512_set1_epi64(7);
-        let eight = _mm512_set1_epi64(8);
-
-        // --- 8-way interleaved main loop (128 u32s = 512 bytes per iteration) ---
-        let ptr = chunk.as_mut_ptr();
-        let len = chunk.len();
-        let full8 = len / (PHILOX32x16 * 8);
-        let mut p = ptr;
-
-        for _ in 0..full8 {
-            // TLB prefetch: warm the page 2KB ahead (half page) so page walks
-            // complete before streaming stores need the TLB entry.
-            unsafe { _mm_prefetch(p.add(PHILOX32x16 * 8 * 2) as *const i8, _MM_HINT_T2) };
-
-            let c0 = c;
-            let c1 = _mm512_mask_add_epi64(c, 0x55, c, one);
-            let c2 = _mm512_mask_add_epi64(c, 0x55, c, two);
-            let c3 = _mm512_mask_add_epi64(c, 0x55, c, three);
-            let c4 = _mm512_mask_add_epi64(c, 0x55, c, four);
-            let c5 = _mm512_mask_add_epi64(c, 0x55, c, five);
-            let c6 = _mm512_mask_add_epi64(c, 0x55, c, six);
-            let c7 = _mm512_mask_add_epi64(c, 0x55, c, seven);
-            c = _mm512_mask_add_epi64(c, 0x55, c, eight);
-
-            let mut x0 = c0;
-            let mut x1 = c1;
-            let mut x2 = c2;
-            let mut x3 = c3;
-            let mut x4 = c4;
-            let mut x5 = c5;
-            let mut x6 = c6;
-            let mut x7 = c7;
-            let mut k0 = k;
-            let mut k1 = k;
-            let mut k2 = k;
-            let mut k3 = k;
-            let mut k4 = k;
-            let mut k5 = k;
-            let mut k6 = k;
-            let mut k7 = k;
-
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-            round8!(
-                x0, k0, x1, k1, x2, k2, x3, k3, x4, k4, x5, k5, x6, k6, x7, k7, m, w
-            );
-
-            unsafe {
-                _mm512_stream_si512(p as *mut _, x0);
-                _mm512_stream_si512(p.add(PHILOX32x16) as *mut _, x1);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 2) as *mut _, x2);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 3) as *mut _, x3);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 4) as *mut _, x4);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 5) as *mut _, x5);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 6) as *mut _, x6);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 7) as *mut _, x7);
-            }
-            p = unsafe { p.add(PHILOX32x16 * 8) };
-        }
-
-        // --- 4-way remainder (0-7 blocks of 16) ---
-        let remaining = len - full8 * PHILOX32x16 * 8;
-        let full4 = remaining / (PHILOX32x16 * 4);
-        for _ in 0..full4 {
-            let c0 = c;
-            let c1 = _mm512_mask_add_epi64(c, 0x55, c, one);
-            let c2 = _mm512_mask_add_epi64(c, 0x55, c, two);
-            let c3 = _mm512_mask_add_epi64(c, 0x55, c, three);
-            c = _mm512_mask_add_epi64(c, 0x55, c, four);
-
-            let mut x0 = c0;
-            let mut x1 = c1;
-            let mut x2 = c2;
-            let mut x3 = c3;
-            let mut k0 = k;
-            let mut k1 = k;
-            let mut k2 = k;
-            let mut k3 = k;
-
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-            round4!(x0, k0, x1, k1, x2, k2, x3, k3, m, w);
-
-            unsafe {
-                _mm512_stream_si512(p as *mut _, x0);
-                _mm512_stream_si512(p.add(PHILOX32x16) as *mut _, x1);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 2) as *mut _, x2);
-                _mm512_stream_si512(p.add(PHILOX32x16 * 3) as *mut _, x3);
-            }
-            p = unsafe { p.add(PHILOX32x16 * 4) };
-        }
-
-        // --- Single-block remainder ---
-        let remaining2 = remaining - full4 * PHILOX32x16 * 4;
-        let full1 = remaining2 / PHILOX32x16;
-        for _ in 0..full1 {
-            let mut x = c;
-            let mut key_local = k;
-            philox10_single!(x, key_local, m, w);
-            unsafe { _mm512_stream_si512(p as *mut _, x) };
-            c = _mm512_mask_add_epi64(c, 0x55, c, one);
-            p = unsafe { p.add(PHILOX32x16) };
-        }
-
-        // --- Partial tail ---
-        let tail = remaining2 - full1 * PHILOX32x16;
-        if tail > 0 {
-            let mut x = c;
-            let mut key_local = k;
-            philox10_single!(x, key_local, m, w);
-            let mut tmp = [0u32; PHILOX32x16];
-            unsafe { _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, x) };
-            for (j, item) in tmp.iter().enumerate().take(tail) {
-                unsafe { *p.add(j) = *item };
-            }
-        }
-        // Non-temporal stores must be fenced on the issuing thread before the data is
-    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
-    #[allow(unused_unsafe)]
-    unsafe { ::core::arch::x86_64::_mm_sfence() };
-}
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn philox32x4x4_next_f32s_chunk(
-        chunk_idx: usize,
-        chunk: &mut [f32],
-        c0: __m512i,
-        k: __m512i,
-        one: __m512i,
-    ) {
-        let m = _mm512_set1_epi64(0xCD9E8D57_D2511F53u64 as i64);
-        let w = _mm512_set1_epi64(0xBB67AE85_9E3779B9u64 as i64);
-        let zero = _mm512_setzero_si512();
-        let offset = chunk_idx as u128 * PHILOX32x4x4_CHUNK_RATIO;
-        let mut c_array = [0u128; 4];
-        unsafe { _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, c0) };
-        for item in &mut c_array {
-            *item = item.wrapping_add(offset);
-        }
-        let mut c = unsafe { _mm512_loadu_si512(c_array.as_ptr() as *const _) };
-
-        let is_aligned = (chunk.as_ptr() as usize) & 63 == 0;
-        let mut chunks_exact = chunk.chunks_exact_mut(PHILOX32x16);
-
-        if is_aligned {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-                let v_res = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-                unsafe { _mm512_stream_ps(dst.as_mut_ptr(), v_res) };
-
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        } else {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-                let v_res = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-                unsafe { _mm512_storeu_ps(dst.as_mut_ptr(), v_res) };
-
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        }
-
-        let rem = chunks_exact.into_remainder();
-        if !rem.is_empty() {
-            let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-            let v_res = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-            let mut tmp_f32 = [0f32; 16];
-            unsafe { _mm512_storeu_ps(tmp_f32.as_mut_ptr() as *mut _, v_res) };
-            rem.copy_from_slice(&tmp_f32[..rem.len()]);
-        }
-        // Non-temporal stores must be fenced on the issuing thread before the data is
-    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
-    #[allow(unused_unsafe)]
-    unsafe { ::core::arch::x86_64::_mm_sfence() };
-}
-    #[cfg(target_arch = "x86_64")]
-    #[allow(clippy::too_many_arguments)]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn philox32x4x4_rand_i32s_chunk(
-        chunk_idx: usize,
-        chunk: &mut [i32],
-        c: __m512i,
-        k: __m512i,
-        one: __m512i,
-        v_range: __m512i,
-        v_min: __m512i,
-    ) {
-        let m = _mm512_set1_epi64(0xCD9E8D57_D2511F53u64 as i64);
-        let w = _mm512_set1_epi64(0xBB67AE85_9E3779B9u64 as i64);
-        let zero = _mm512_setzero_si512();
-        let offset = (chunk_idx as u128) << PHILOX32x4x4_SHIFT;
-        let mut c_array = [0u128; 4];
-        unsafe { _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, c) };
-        for item in &mut c_array {
-            *item = item.wrapping_add(offset);
-        }
-        let mut c = unsafe { _mm512_loadu_si512(c_array.as_ptr() as *const _) };
-
-        let is_aligned = (chunk.as_ptr() as usize) & 63 == 0; // N % 64 == 0
-        let mut chunks_exact = chunk.chunks_exact_mut(PHILOX32x16);
-
-        if is_aligned {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-
-                let v_res = crate::rngv::to_randi_u32x16(v_u32, v_range, v_min);
-                unsafe { _mm512_stream_si512(dst.as_mut_ptr() as *mut _, v_res) };
-
-                // +1
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        } else {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-
-                let v_res = crate::rngv::to_randi_u32x16(v_u32, v_range, v_min);
-
-                unsafe { _mm512_storeu_si512(dst.as_mut_ptr() as *mut _, v_res) };
-
-                // +1
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        }
-
-        let rem = chunks_exact.into_remainder();
-        if !rem.is_empty() {
-            let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-            let v_res = crate::rngv::to_randi_u32x16(v_u32, v_range, v_min);
-
-            let mut tmp_res = [0i32; 16];
-            unsafe { _mm512_storeu_si512(tmp_res.as_mut_ptr() as *mut _, v_res) };
-
-            rem.copy_from_slice(&tmp_res[..rem.len()]);
-        }
-        // Non-temporal stores must be fenced on the issuing thread before the data is
-    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
-    #[allow(unused_unsafe)]
-    unsafe { ::core::arch::x86_64::_mm_sfence() };
-}
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f")]
-    unsafe fn philox32x4x4_rand_f32s_chunk(
-        chunk_idx: usize,
-        chunk: &mut [f32],
-        c: __m512i,
-        k: __m512i,
-        one: __m512i,
-        v_mult: __m512,
-        v_min: __m512,
-    ) {
-        let m = _mm512_set1_epi64(0xCD9E8D57_D2511F53u64 as i64);
-        let w = _mm512_set1_epi64(0xBB67AE85_9E3779B9u64 as i64);
-        let zero = _mm512_setzero_si512();
-        let offset = chunk_idx as u128 * PHILOX32x4x4_CHUNK_RATIO;
-        let mut c_array = [0u128; 4];
-        unsafe { _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, c) };
-        for item in &mut c_array {
-            *item = item.wrapping_add(offset);
-        }
-        let mut c = unsafe { _mm512_loadu_si512(c_array.as_ptr() as *const _) };
-
-        let is_aligned = (chunk.as_ptr() as usize) & 63 == 0;
-        let mut chunks_exact = chunk.chunks_exact_mut(PHILOX32x16);
-
-        if is_aligned {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-                let v_f32 = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-                let v_res = _mm512_fmadd_ps(v_f32, v_mult, v_min);
-                unsafe { _mm512_stream_ps(dst.as_mut_ptr(), v_res) };
-
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        } else {
-            for dst in chunks_exact.by_ref() {
-                let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-                let v_f32 = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-                let v_res = _mm512_fmadd_ps(v_f32, v_mult, v_min);
-                unsafe { _mm512_storeu_ps(dst.as_mut_ptr(), v_res) };
-
-                let next_c = _mm512_mask_add_epi64(c, 0x55, c, one);
-                let eq_zero_mask = _mm512_cmpeq_epi64_mask(next_c, zero);
-                let carry_mask = (eq_zero_mask & 0x55) << 1;
-                c = _mm512_mask_add_epi64(next_c, carry_mask, next_c, one);
-            }
-        }
-
-        let rem = chunks_exact.into_remainder();
-        if !rem.is_empty() {
-            let v_u32 = philox32x4x4_compute_vec(c, k, m, w);
-            let v_f32 = unsafe { crate::_internal::simd_f01::u32x16(v_u32) };
-            let v_res = _mm512_fmadd_ps(v_f32, v_mult, v_min);
-            let mut tmp_f32 = [0f32; 16];
-            unsafe { _mm512_storeu_ps(tmp_f32.as_mut_ptr() as *mut _, v_res) };
-            rem.copy_from_slice(&tmp_f32[..rem.len()]);
-        }
-        // Non-temporal stores must be fenced on the issuing thread before the data is
-    // read elsewhere (std::arch docs, "Safety of non-temporal stores").
-    #[allow(unused_unsafe)]
-    unsafe { ::core::arch::x86_64::_mm_sfence() };
-}
-
-    /// Fills the output buffer with the next random `u32` values.
-    /// This function utilizes AVX-512 SIMD and parallel processing for high throughput.
-    #[unsafe(no_mangle)]
-    pub unsafe extern "C" fn philox32x4x4_next_u32s(ptr: *mut Philox32x4x4, out: *mut u32, count: usize) {
-        if count == 0 || out.is_null() {
-            return;
-        }
-        unsafe {
-            let Some(rng) = ptr.as_mut() else { return };
-            let c = rng.c;
-            let k = rng.k;
-            let one = _mm512_set1_epi64(1);
-
-            // Align output to 64 bytes for streaming stores
-            let misalign_bytes = (out as usize) & 63;
-            let head_elems = if misalign_bytes == 0 {
-                0
-            } else {
-                ((64 - misalign_bytes) / 4).min(count)
-            };
-
-            // Process unaligned head (at most 15 elements via one Philox block)
-            if head_elems > 0 {
-                let m = _mm512_set1_epi64(0xCD9E8D57_D2511F53u64 as i64);
-                let w = _mm512_set1_epi64(0xBB67AE85_9E3779B9u64 as i64);
-                let x = philox32x4x4_compute_vec(c, k, m, w);
-                let mut tmp = [0u32; PHILOX32x16];
-                _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, x);
-                for (i, item) in tmp.iter().enumerate().take(head_elems) {
-                    *out.add(i) = *item;
+    unsafe fn fill_chunk_x4x4<T, M>(chunk: &mut [T], c: __m512i, k: __m512i, nt: bool, map: &M)
+    where
+        T: Copy + Default,
+        M: Fn(u32) -> T,
+    {
+        let mut c = c;
+        let gen_batch = || {
+            let cs = [
+                c,
+                Philox32x4x4::add_blocks(c, 1),
+                Philox32x4x4::add_blocks(c, 2),
+                Philox32x4x4::add_blocks(c, 3),
+            ];
+            c = Philox32x4x4::add_blocks(c, 4);
+            let mut out = [T::default(); BATCH];
+            for (dst, cb) in out.chunks_exact_mut(PHILOX32x16).zip(cs) {
+                // SAFETY: 64 plain bytes either way.
+                let words: [u32; PHILOX32x16] =
+                    unsafe { std::mem::transmute(Philox32x4x4::block(cb, k)) };
+                for (o, w) in dst.iter_mut().zip(words) {
+                    *o = map(w);
                 }
             }
+            out
+        };
+        unsafe { fill_chunk_auto(chunk, nt, gen_batch) };
+    }
 
-            let body_count = count - head_elems;
-            if body_count > 0 {
-                let body_ptr = out.add(head_elems);
-                let body_buffer = from_raw_parts_mut(body_ptr, body_count);
+    /// Fills `buf` with successive 16-word blocks and advances the state by
+    /// `ceil(buf.len() / 16)` blocks.
+    ///
+    /// # Safety
+    ///
+    /// The CPU must support AVX-512F (guaranteed for handles made by
+    /// `philox32x4x4_new`).
+    unsafe fn philox32x4x4_fill<T, M>(rng: &mut Philox32x4x4, buf: &mut [T], map: M)
+    where
+        T: Copy + Default + Send,
+        M: Fn(u32) -> T + Sync,
+    {
+        let c0 = rng.c;
+        let k = rng.k;
+        let nt = prefer_nt::<T>(buf.len());
+        // SAFETY: __m512i is 64 plain bytes; it is sent to the workers by value.
+        let (c0b, kb): ([u8; 64], [u8; 64]) = unsafe { (std::mem::transmute(c0), std::mem::transmute(k)) };
+        buf.par_chunks_mut(PAR_CHUNK)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| unsafe {
+                let c0: __m512i = std::mem::transmute(c0b);
+                let k: __m512i = std::mem::transmute(kb);
+                let c = Philox32x4x4::add_blocks(c0, (chunk_idx * (PAR_CHUNK / PHILOX32x16)) as u128);
+                fill_chunk_x4x4(chunk, c, k, nt, &map);
+            });
+        let blocks = buf.len().div_ceil(PHILOX32x16) as u128;
+        rng.c = unsafe { Philox32x4x4::add_blocks(c0, blocks) };
+    }
 
-                // Advance counter past head block
-                let c_body = if head_elems > 0 {
-                    let mut c_arr = [0u128; 4];
-                    _mm512_storeu_si512(c_arr.as_mut_ptr() as *mut _, c);
-                    for item in &mut c_arr {
-                        *item = item.wrapping_add(1);
-                    }
-                    _mm512_loadu_si512(c_arr.as_ptr() as *const _)
-                } else {
-                    c
-                };
-
-                body_buffer
-                    .par_chunks_mut(PHILOX32x4x4_PAR_CHUNK)
-                    .enumerate()
-                    .for_each(|(chunk_idx, chunk)| {
-                        philox32x4x4_next_u32s_chunk(chunk_idx, chunk, c_body, k, one)
-                    });
-            }
-
-            let num_blocks = ((count + PHILOX32x16 - 1) >> PHILOX32x16_SHIFT) as u128;
-            let mut c_array = [0u128; 4];
-            _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, rng.c);
-            for item in &mut c_array {
-                *item = item.wrapping_add(num_blocks);
-            }
-            rng.c = _mm512_loadu_si512(c_array.as_ptr() as *const _);
+    /// Fills the output buffer with the next random `u32` values.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn philox32x4x4_next_u32s(ptr: *mut Philox32x4x4, out: *mut u32, count: usize) {
+        unsafe {
+            let Some(rng) = ptr.as_mut() else { return };
+            let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+            philox32x4x4_fill(rng, buf, |x| x);
         }
     }
+
     /// Fills the output buffer with the next random `f32` values in the range [0, 1).
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn philox32x4x4_next_f32s(ptr: *mut Philox32x4x4, out: *mut f32, count: usize) {
-        if count == 0 {
-            return;
-        }
         unsafe {
             let Some(rng) = ptr.as_mut() else { return };
-            let c0 = rng.c;
-            let k = rng.k;
-            let one = _mm512_set1_epi64(1);
-
-            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-
-            buffer
-                .par_chunks_mut(PHILOX32x4x4_PAR_CHUNK)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    philox32x4x4_next_f32s_chunk(chunk_idx, chunk, c0, k, one);
-                });
-
-            let num_blocks = ((count + PHILOX32x16 - 1) >> PHILOX32x16_SHIFT) as u128;
-            let mut c_array = [0u128; 4];
-            _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, rng.c);
-            for item in &mut c_array {
-                *item = item.wrapping_add(num_blocks);
-            }
-            rng.c = _mm512_loadu_si512(c_array.as_ptr() as *const _);
+            let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+            philox32x4x4_fill(rng, buf, |x| x.to_f01());
         }
     }
+
     /// Fills the output buffer with random `i32` values in the range [min, max].
+    /// Writes nothing if `min > max`.
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn philox32x4x4_rand_i32s(
         ptr: *mut Philox32x4x4,
@@ -1009,40 +233,17 @@ mod simd {
         min: i32,
         max: i32,
     ) {
-        if count == 0 {
+        if min > max {
             return;
         }
         unsafe {
             let Some(rng) = ptr.as_mut() else { return };
-            let c = rng.c;
-            let k = rng.k;
-            let one = _mm512_set1_epi64(1);
-
-            let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
-            let v_min = _mm512_set1_epi32(min);
-
-            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-
-            buffer
-                .par_chunks_mut(PHILOX32x4x4_PAR_CHUNK)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    philox32x4x4_rand_i32s_chunk(
-                        chunk_idx, chunk, c, k, one, v_range, v_min,
-                    );
-                });
-
-            let num_blocks = ((count + PHILOX32x16 - 1) >> PHILOX32x16_SHIFT) as u128;
-            let mut c_array = [0u128; 4];
-            _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, rng.c);
-            for item in &mut c_array {
-                *item = item.wrapping_add(num_blocks);
-            }
-            rng.c = _mm512_loadu_si512(c_array.as_ptr() as *const _);
+            let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+            philox32x4x4_fill(rng, buf, |x| x.to_randi(min, max));
         }
     }
+
     /// Fills the output buffer with random `f32` values in the range [min, max).
-    /// This function utilizes AVX-512 SIMD and parallel processing for high throughput.
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn philox32x4x4_rand_f32s(
         ptr: *mut Philox32x4x4,
@@ -1051,34 +252,32 @@ mod simd {
         min: f32,
         max: f32,
     ) {
-        if count == 0 {
-            return;
-        }
         unsafe {
             let Some(rng) = ptr.as_mut() else { return };
-            let c = rng.c;
-            let k = rng.k;
-            let one = _mm512_set1_epi64(1);
-
-            let v_mult = _mm512_set1_ps(max - min);
-            let v_min = _mm512_set1_ps(min);
-
-            let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-
-            buffer
-                .par_chunks_mut(PHILOX32x4x4_PAR_CHUNK)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    philox32x4x4_rand_f32s_chunk(chunk_idx, chunk, c, k, one, v_mult, v_min);
-                });
-
-            let num_blocks = ((count + PHILOX32x16 - 1) >> PHILOX32x16_SHIFT) as u128;
-            let mut c_array = [0u128; 4];
-            _mm512_storeu_si512(c_array.as_mut_ptr() as *mut _, rng.c);
-            for item in &mut c_array {
-                *item = item.wrapping_add(num_blocks);
-            }
-            rng.c = _mm512_loadu_si512(c_array.as_ptr() as *const _);
+            let Some(buf) = crate::_internal::out_slice(out, count) else { return };
+            philox32x4x4_fill(rng, buf, |x| x.to_randf(min, max));
         }
     }
-} // mod simd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rng::Rng;
+
+    /// Bulk fill matches `nextu` across a carry through all four counter words.
+    #[test]
+    fn bulk_fill_carries_through_128_bit_counter() {
+        let mut a = Philox32::new(1);
+        a.c = wrap![u32::MAX - 2, u32::MAX, u32::MAX, 0];
+        let mut b = a;
+        let mut buf = vec![0u32; 64];
+        par_fill_ctr(&mut a, &mut buf, |x| x);
+        for &x in &buf {
+            assert_eq!(x, b.nextu());
+        }
+        assert_eq!(a.c.map(|w| *w), [13, 0, 0, 1]);
+        a.set_ctr(u128::MAX - 5);
+        assert_eq!(a.ctr(), u128::MAX - 5);
+    }
+}

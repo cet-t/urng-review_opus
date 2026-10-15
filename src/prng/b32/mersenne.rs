@@ -83,10 +83,28 @@ const MT32_LOWER_MASK: u32 = 0x7FFFFFFF;
 
 impl Mt19937 {
     /// Creates a new `Mt19937` instance with the given seed.
+    ///
+    /// The seed is first mixed through SplitMix32, so this is **not** the
+    /// reference seeding: `Mt19937::new(s)` equals
+    /// `Mt19937::from_init_genrand(SplitMix32::new(s).nextu())`. Use
+    /// [`Mt19937::from_init_genrand`] to match `init_genrand` / C++
+    /// `std::mt19937` / NumPy's `RandomState` legacy seeding.
     pub fn new(seed: u32) -> Self {
-        let mut mt = [wrap!(0u32); MT32_N];
         let mut seedgen = SplitMix32::new(seed);
-        mt[0] = wrap!(seedgen.nextu());
+        Self::from_init_genrand(seedgen.nextu())
+    }
+
+    /// Creates an `Mt19937` seeded exactly like the reference `init_genrand`
+    /// (Matsumoto & Nishimura, mt19937ar.c), i.e. like C++ `std::mt19937(seed)`.
+    ///
+    /// ```
+    /// use urng::{Mt19937, Rng};
+    /// let mut mt = Mt19937::from_init_genrand(5489); // std::mt19937 default seed
+    /// assert_eq!(mt.nextu(), 3499211612);
+    /// ```
+    pub fn from_init_genrand(seed: u32) -> Self {
+        let mut mt = [wrap!(0u32); MT32_N];
+        mt[0] = wrap!(seed);
         for i in 1..MT32_N {
             let prev = mt[i - 1];
             mt[i] = (prev ^ (prev >> 30)) * 1812433253u32 + i as u32;
@@ -203,7 +221,38 @@ const SFMT_PARITY3: u32 = 0x00000000;
 const SFMT_PARITY4: u32 = 0x13c9e684;
 
 impl Sfmt19937 {
+    /// Creates an `Sfmt19937` seeded exactly like the reference
+    /// `sfmt_init_gen_rand` (Saito & Matsumoto, SFMT 1.5), including the
+    /// period certification.
+    ///
+    /// ```
+    /// use urng::{Rng, Sfmt19937};
+    /// let mut s = Sfmt19937::from_init_gen_rand(1234); // SFMT.19937.out.txt
+    /// assert_eq!(s.nextu(), 3440181298);
+    /// ```
+    pub fn from_init_gen_rand(seed: u32) -> Self {
+        let mut raw = [0u32; SFMT_N << 2];
+        raw[0] = seed;
+        for i in 1..raw.len() {
+            raw[i] = 1812433253u32.wrapping_mul(raw[i - 1] ^ (raw[i - 1] >> 30)).wrapping_add(i as u32);
+        }
+        let mut state = [[0u32; 4]; SFMT_N];
+        for (i, s) in state.iter_mut().enumerate() {
+            s.copy_from_slice(&raw[4 * i..4 * i + 4]);
+        }
+        let mut rng = Self {
+            state,
+            idx: wrap!(SFMT_N << 2),
+        };
+        rng.period_certification();
+        rng
+    }
+
     /// Creates a new `Sfmt19937` instance with the given seed.
+    ///
+    /// The state is filled from SplitMix64 rather than the reference
+    /// recurrence, so outputs differ from the reference implementation; use
+    /// [`Sfmt19937::from_init_gen_rand`] for reference-compatible seeding.
     pub fn new(seed: u32) -> Self {
         let mut seedgen = sm64_from_seed32!(seed);
 
@@ -707,6 +756,48 @@ define_sfmt_variant!(
 mod tests {
 
     use super::*;
+
+    /// REVIEW B12: reference-compatible seeding. 4123659995 is the 10000th
+    /// output that the C++ standard requires of a default-constructed
+    /// `std::mt19937` ([rand.predef]); 3499211612 is its first output.
+    #[test]
+    fn mt19937_reference_seeding() {
+        let mut mt = Mt19937::from_init_genrand(5489);
+        assert_eq!(mt.nextu(), 3499211612);
+        for _ in 1..9999 {
+            let _ = mt.nextu();
+        }
+        assert_eq!(mt.nextu(), 4123659995);
+        // the reference state recurrence
+        let r = Mt19937::from_init_genrand(42);
+        assert_eq!(r.mt.map(|w| *w), crate::_reftest::mt_init(42));
+        // `new` keeps its value-compatible meaning (SplitMix32 pre-mix)
+        let mut a = Mt19937::new(7);
+        let mut b = Mt19937::from_init_genrand(SplitMix32::new(7).nextu());
+        for _ in 0..1000 {
+            assert_eq!(a.nextu(), b.nextu());
+        }
+    }
+
+    /// SFMT19937 with `sfmt_init_gen_rand(1234)` (first value of the official
+    /// SFMT.19937.out.txt), and the state equals an independent
+    /// implementation of the reference initialisation.
+    #[test]
+    fn sfmt19937_reference_seeding() {
+        let s = Sfmt19937::from_init_gen_rand(1234);
+        let st: Vec<u32> = s.state.iter().flatten().copied().collect();
+        assert_eq!(st, crate::_reftest::sfmt19937_init(1234));
+        let mut s = s;
+        assert_eq!(s.nextu(), 3440181298);
+        // period certification modifies the state when the parity check fails
+        let fixed = (0..64u32)
+            .filter(|&seed| Sfmt19937::from_init_gen_rand(seed).state[0][0] != crate::_reftest::mt_init(seed)[0])
+            .count();
+        let reference_fixed = (0..64u32)
+            .filter(|&seed| crate::_reftest::sfmt19937_init(seed)[0] != crate::_reftest::mt_init(seed)[0])
+            .count();
+        assert_eq!(fixed, reference_fixed);
+    }
 
     crate::safe_test! {
         Mt19937,

@@ -251,7 +251,7 @@ mod tests {
 
 impl Sfc64 {
     /// Builds the generator from a raw `(a, b, c, counter)` state (test helper).
-    #[cfg(all(test, feature = "cabi"))]
+    #[cfg(all(test, feature = "cabi", feature = "simd", target_arch = "x86_64"))]
     pub(crate) fn from_state(s: [u64; 4]) -> Self {
         Self { a: wrap!(s[0]), b: wrap!(s[1]), c: wrap!(s[2]), counter: wrap!(s[3]) }
     }

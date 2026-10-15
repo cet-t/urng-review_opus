@@ -365,6 +365,78 @@ pub(crate) unsafe fn fill_chunk_auto<T: Copy, const N: usize, F: FnMut() -> [T; 
     unsafe { fill_chunk(chunk, generate) }
 }
 
+/// A counter-mode block generator whose [`crate::rng::Rng::nextu`] stream is
+/// `block(ctr), block(ctr + 1), ...` served word by word through a ring buffer.
+#[cfg(feature = "cabi")]
+pub(crate) trait CtrRing: crate::rng::Rng + Sync {
+    /// Words per block (must divide 64).
+    const N: usize;
+    /// Whether words of the current block are still buffered.
+    fn buffered(&self) -> bool;
+    /// The counter of the next block to compute.
+    fn ctr(&self) -> u128;
+    fn set_ctr(&mut self, ctr: u128);
+    /// Writes `block(ctr)` into `out[..N]`.
+    fn block(&self, ctr: u128, out: &mut [Self::Word]);
+}
+
+/// Bulk fill for [`CtrRing`] generators (REVIEW B14). The output is exactly
+/// what `buf.len()` successive `nextu` calls return: buffered words first,
+/// then whole blocks generated in parallel from the counter, then a final
+/// partial block through the ring buffer so the next call continues with the
+/// unused words. Independent of buffer alignment and thread scheduling.
+#[cfg(feature = "cabi")]
+pub(crate) fn par_fill_ctr<R, T, M>(rng: &mut R, buf: &mut [T], map: M)
+where
+    R: CtrRing,
+    R::Word: Copy + Default,
+    T: Copy + Default + Send,
+    M: Fn(R::Word) -> T + Sync,
+{
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::slice::ParallelSliceMut;
+    const PAR_CHUNK: usize = 0x20000;
+    const BATCH: usize = 64;
+    debug_assert!(BATCH % R::N == 0 && PAR_CHUNK % R::N == 0);
+
+    let mut head = 0;
+    while rng.buffered() && head < buf.len() {
+        buf[head] = map(rng.nextu());
+        head += 1;
+    }
+    let rest = &mut buf[head..];
+    let whole = rest.len() / R::N * R::N;
+    let (body, tail) = rest.split_at_mut(whole);
+    let c0 = rng.ctr();
+    let nt = prefer_nt::<T>(body.len());
+    {
+        let r: &R = rng;
+        body.par_chunks_mut(PAR_CHUNK)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                let mut ctr = c0.wrapping_add((chunk_idx * (PAR_CHUNK / R::N)) as u128);
+                let mut words = [R::Word::default(); BATCH];
+                unsafe {
+                    fill_chunk_auto(chunk, nt, || {
+                        let mut out = [T::default(); BATCH];
+                        for blk in words.chunks_exact_mut(R::N) {
+                            r.block(ctr, blk);
+                            ctr = ctr.wrapping_add(1);
+                        }
+                        for (o, w) in out.iter_mut().zip(words) {
+                            *o = map(w);
+                        }
+                        out
+                    });
+                }
+            });
+    }
+    rng.set_ctr(c0.wrapping_add((whole / R::N) as u128));
+    for o in tail {
+        *o = map(rng.nextu());
+    }
+}
+
 /// Parallel bulk fill for sequential 32-bit-seeded RNGs: each 512KB chunk
 /// runs its own RNG reseeded via [`chunk_seed32`], 16 outputs are batched
 /// per generator call (64B for 4-byte `T`), and stores are size-adaptive

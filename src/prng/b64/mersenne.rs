@@ -83,10 +83,27 @@ const LOWER_MASK: u64 = 0x7FFFFFFF;
 
 impl Mt1993764 {
     /// Creates a new `Mt1993764` instance with the given seed.
+    ///
+    /// The seed is first mixed through SplitMix64, so this is **not** the
+    /// reference seeding: `Mt1993764::new(s)` equals
+    /// `Mt1993764::from_init_genrand64(SplitMix64::new(s).nextu())`. Use
+    /// [`Mt1993764::from_init_genrand64`] to match C++ `std::mt19937_64`.
     pub fn new(seed: u64) -> Self {
-        let mut mt = wrap![0; N];
         let mut seedgen = SplitMix64::new(seed);
-        mt[0] = wrap!(seedgen.nextu());
+        Self::from_init_genrand64(seedgen.nextu())
+    }
+
+    /// Creates an `Mt1993764` seeded exactly like the reference
+    /// `init_genrand64` (mt19937-64.c), i.e. like C++ `std::mt19937_64(seed)`.
+    ///
+    /// ```
+    /// use urng::{Mt1993764, Rng};
+    /// let mut mt = Mt1993764::from_init_genrand64(5489);
+    /// assert_eq!(mt.nextu(), 14514284786278117030);
+    /// ```
+    pub fn from_init_genrand64(seed: u64) -> Self {
+        let mut mt = wrap![0; N];
+        mt[0] = wrap!(seed);
         for i in 1..N {
             let prev = mt[i - 1];
             mt[i] = (prev ^ (prev >> 62)) * 6364136223846793005u64 + (i as u64);
@@ -346,6 +363,25 @@ impl Rng for Sfmt1993764 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REVIEW B12: 9981545732273789042 is the 10000th output the C++ standard
+    /// requires of a default-constructed `std::mt19937_64` ([rand.predef]).
+    #[test]
+    fn mt1993764_reference_seeding() {
+        let mut mt = Mt1993764::from_init_genrand64(5489);
+        assert_eq!(mt.nextu(), 14514284786278117030);
+        for _ in 1..9999 {
+            let _ = mt.nextu();
+        }
+        assert_eq!(mt.nextu(), 9981545732273789042);
+        let r = Mt1993764::from_init_genrand64(42);
+        assert_eq!(r.mt.map(|w| *w), crate::_reftest::mt64_init(42));
+        let mut a = Mt1993764::new(7);
+        let mut b = Mt1993764::from_init_genrand64(SplitMix64::new(7).nextu());
+        for _ in 0..1000 {
+            assert_eq!(a.nextu(), b.nextu());
+        }
+    }
 
     crate::safe_test! {
         Mt1993764,

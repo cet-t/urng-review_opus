@@ -26,7 +26,6 @@ const THREEFRY32_C240: u32 = 0x1BD11BDA;
 pub struct Threefry32x4 {
     pub(crate) c: [wu32; 4],
     pub(crate) k: [wu32; 5],
-    pub(crate) tw: [wu32; 3],
     pub(crate) pos: wusize,
     pub(crate) buf: [wu32; 4],
 }
@@ -42,28 +41,26 @@ impl Threefry32x4 {
         }
         k[4] = k[0] ^ k[1] ^ k[2] ^ k[3] ^ THREEFRY32_C240;
 
-        let tw0 = seedgen.nextu();
-        let tw1 = seedgen.nextu();
-        let tw = wrap![tw0, tw1, tw0 ^ tw1];
-
         Self {
             c: wrap![0; 4],
             k,
-            tw,
             pos: wrap!(4),
             buf: wrap![0; 4],
         }
     }
 
-    /// Pure counter-based computation: applies 20 rounds of Threefish to produce 4 output words.
+    /// Pure counter-based computation: Random123 Threefry4x32-20.
+    ///
+    /// REVIEW B12: the previous version added Threefish-style tweak words in
+    /// every key injection and XORed the counter into the output, so it was not
+    /// the Random123 function its documentation names.
     ///
     /// # Arguments
     ///
     /// * `c`  - 4-word counter (the plaintext block).
     /// * `k`  - 5-word key schedule (k\[4\] = parity word).
-    /// * `tw` - 3-word tweak schedule (tw\[2\] = tw\[0\] ^ tw\[1\]).
     #[inline(always)]
-    pub(crate) fn compute(c: [wu32; 4], k: &[wu32; 5], tw: &[wu32; 3]) -> [wu32; 4] {
+    pub(crate) fn compute(c: [wu32; 4], k: &[wu32; 5]) -> [wu32; 4] {
         let mut v = c;
 
         macro_rules! round {
@@ -84,9 +81,9 @@ impl Threefry32x4 {
         macro_rules! inject_key {
             ($s:expr) => {
                 v[0] += k[$s % 5];
-                v[1] += (k[($s + 1) % 5]) + tw[$s % 3];
-                v[2] += (k[($s + 2) % 5]) + tw[($s + 1) % 3];
-                v[3] += (k[($s + 3) % 5]) + $s as u32;
+                v[1] += k[($s + 1) % 5];
+                v[2] += k[($s + 2) % 5];
+                v[3] += k[($s + 3) % 5] + $s as u32;
             };
         }
 
@@ -120,17 +117,8 @@ impl Threefry32x4 {
         round!(13, 27);
         round!(23, 5);
 
-        let ksi5_0 = k[0];
-        let ksi5_1 = k[1] + tw[2];
-        let ksi5_2 = k[2] + tw[0];
-        let ksi5_3 = k[3] + 5;
-
-        [
-            (v[0] + ksi5_0) ^ c[0],
-            (v[1] + ksi5_1) ^ c[1],
-            (v[2] + ksi5_2) ^ c[2],
-            (v[3] + ksi5_3) ^ c[3],
-        ]
+        inject_key!(5);
+        v
     }
 
     /// Generates the next block of 4 random `u32` values in one call.
@@ -140,7 +128,7 @@ impl Threefry32x4 {
     /// throughput-sensitive callers that want the whole block at once).
     #[inline(always)]
     pub fn next_raw(&mut self) -> [wu32; 4] {
-        let dst = Self::compute(self.c, &self.k, &self.tw);
+        let dst = Self::compute(self.c, &self.k);
 
         self.c[0] += 1;
         if self.c[0] == 0 {
@@ -268,9 +256,7 @@ impl Threefry32x2 {
     /// throughput-sensitive callers that want the whole block at once).
     #[inline(always)]
     pub fn next_raw(&mut self) -> [wu32; 2] {
-        let k = self.k;
-        let dst = Self::compute(self.c, &k);
-        self.k.iter_mut().enumerate().for_each(|(i, x)| *x = k[i]);
+        let dst = Self::compute(self.c, &self.k);
         let (n_c0, overflow) = self.c[0].overflowing_add(1);
         self.c[0] = n_c0.into();
         if overflow {
@@ -289,5 +275,45 @@ mod tests {
     crate::safe_test! {
         Threefry32x4,
         Threefry32x2
+    }
+
+    /// Random123 known-answer tests (kat_vectors: threefry2x32_20, threefry4x32_20).
+    #[test]
+    fn threefry_random123_kats() {
+        let kats2: [([u32; 2], [u32; 2], [u32; 2]); 3] = [
+            ([0; 2], [0; 2], [0x6b200159, 0x99ba4efe]),
+            ([u32::MAX; 2], [u32::MAX; 2], [0x1cb996fc, 0xbb002be7]),
+            ([0x243f6a88, 0x85a308d3], [0x13198a2e, 0x03707344], [0xc4923a9c, 0x483df7a0]),
+        ];
+        for (c, k, want) in kats2 {
+            assert_eq!(crate::_reftest::threefry2x32_20(c, k), want, "reference 2x32");
+            let ks = wrap![k[0], k[1], k[0] ^ k[1] ^ THREEFRY32_C240];
+            let got = Threefry32x2::compute(wrap![c[0], c[1]], &ks).map(|w| *w);
+            assert_eq!(got, want, "Threefry32x2");
+        }
+        let kats4: [([u32; 4], [u32; 4], [u32; 4]); 3] = [
+            ([0; 4], [0; 4], [0x9c6ca96a, 0xe17eae66, 0xfc10ecd4, 0x5256a7d8]),
+            ([u32::MAX; 4], [u32::MAX; 4], [0x2a881696, 0x57012287, 0xf6c7446e, 0xa16a6732]),
+            (
+                [0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344],
+                [0xa4093822, 0x299f31d0, 0x082efa98, 0xec4e6c89],
+                [0x59cd1dbb, 0xb8879579, 0x86b5d00c, 0xac8b6d84],
+            ),
+        ];
+        for (c, k, want) in kats4 {
+            assert_eq!(crate::_reftest::threefry4x32_20(c, k), want, "reference 4x32");
+            let ks = wrap![k[0], k[1], k[2], k[3], k[0] ^ k[1] ^ k[2] ^ k[3] ^ THREEFRY32_C240];
+            let got = Threefry32x4::compute(wrap![c[0], c[1], c[2], c[3]], &ks).map(|w| *w);
+            assert_eq!(got, want, "Threefry32x4");
+        }
+        // the Rng stream is consecutive counters through the ring buffer
+        let mut g = Threefry32x4::new(5);
+        let k = g.k;
+        for n in 0..3u32 {
+            let want = Threefry32x4::compute(wrap![n, 0, 0, 0], &k);
+            for w in want {
+                assert_eq!(g.nextu(), *w);
+            }
+        }
     }
 }
