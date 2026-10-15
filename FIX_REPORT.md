@@ -3,20 +3,23 @@
 基準コミット: `4068051`（phase 1: review。crates.io の urng 1.0.0 と同一のソース）。
 レビュー指摘番号（B1〜B22）は `REVIEW.md` と対応しています。
 
+注: 共同著作者トレーラー追加のため履歴を書き換えました（内容は不変、ツリーID一致を確認）。
+本ファイルのハッシュは書き換え後のものです。旧履歴はタグ `pre-coauthor-4c26943` に残っています。
+
 ## 進捗（作業途中で中断した場合はここから再開）
 
 | # | 指摘 | 状態 | コミット |
 |---|---|---|---|
-| 1 | B1 Readme.md のパス | 完了 | f39ed50 |
-| 2 | B2 Xoshiro256Ssx2 | 完了 | 98cffa4 |
-| 3 | B3 C ABI 一括生成の重複 | 完了 | c6da0c1 |
-| 4 | B4 seed \| 1 | 完了 | 99a1d06 |
-| 5 | B5 shuffle | 完了 | e5e903f |
-| 6 | B6 TwistedGFSR | 完了 | d40ba8f |
-| 7 | B11 先頭出力ゼロ | 完了 | 68717b0 |
-| 8 | B10 アルゴリズム欠陥 | 完了 | 4abd9c7 |
-| 9 | B12 Biski64x8 | 完了 | 1b20cd1 |
-| 10 | B9 ChaCha/Salsa | 完了 | 3ffd2e1 |
+| 1 | B1 Readme.md のパス | 完了 | 80f367e |
+| 2 | B2 Xoshiro256Ssx2 | 完了 | 04aa92d |
+| 3 | B3 C ABI 一括生成の重複 | 完了 | 22bb053 |
+| 4 | B4 seed \| 1 | 完了 | 3673130 |
+| 5 | B5 shuffle | 完了 | c6ff383 |
+| 6 | B6 TwistedGFSR | 完了 | a96aa53 |
+| 7 | B11 先頭出力ゼロ | 完了 | f26c0c4 |
+| 8 | B10 アルゴリズム欠陥 | 完了 | bc8ec6a |
+| 9 | B12 Biski64x8 | 完了 | 8abacf2 |
+| 10 | B9 ChaCha/Salsa | 完了 | c8cfb16 |
 | 11 | B8 AVX2型のAVX-512VL使用 | **未着手**（設計のみ。下記） | |
 | 12 | B7 健全性 | **未着手**（設計のみ。下記） | |
 | 13 | B12 残り（Philox32/Philox32x4x4/Xoroshiro64Ssx8・x16/Threefry32x4/MTシード） | 未着手 | |
@@ -43,7 +46,7 @@
 | B12（Biski） | `loop_mix` を旧値から計算（Rust・C ABI） | 全レーン=スカラー |
 | B9 | ChaCha を RFC 8439 準拠、Salsa20 を仕様準拠（回転13、feed-forward、正しいラウンド数）。`from_key` 追加、Debug で鍵を表示しない | RFC 8439 §2.3.2、eSTREAM Salsa20 Set1 #0、仕様の quarterround、参照比較、自己フィードバックしないこと |
 
-最終確認時点（3ffd2e1）: `cargo test --features full` で 単体 129、結合 3+1+5、doctest 108（README の ignore 2 件）すべて通過。
+最終確認時点（c8cfb16）: `cargo test --features full` で 単体 129、結合 3+1+5、doctest 108（README の ignore 2 件）すべて通過。
 
 ## 互換性への影響（ここまで）
 
