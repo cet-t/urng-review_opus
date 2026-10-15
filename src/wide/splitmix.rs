@@ -27,10 +27,10 @@ macro_rules! impl_variants {
 
             #[allow(dead_code)]
             impl [<SplitMix32x $size>] {
-                #[doc = "Creates a new generator, seeding every lane from `seed | 1` and advancing by the golden ratio."]
+                #[doc = "Creates a new generator, seeding every lane from `seed` and advancing by the golden ratio."]
                 pub fn new(seed: u32) -> Self {
                     let mut state = [0u32; $size];
-                    state.iter_mut().fold(seed | 1, |s, x| {
+                    state.iter_mut().fold(seed, |s, x| {
                         *x = s;
                         s.wrapping_add(0x9E3779B9)
                     });

@@ -20,7 +20,7 @@ pub struct Xoroshiro128Pp {
 impl Xoroshiro128Pp {
     /// Creates a new `Xoroshiro128Pp` instance with the given seed.
     pub const fn new(seed: u64) -> Self {
-        let mut seedgen = SplitMix64::new(seed | 1);
+        let mut seedgen = SplitMix64::new(seed);
         Self {
             s: wrap![seedgen.nextu_const(), seedgen.nextu_const()],
         }

@@ -27,6 +27,8 @@ mod tests {
     fn it_works() {
         let mut rng = crate::Sfc32::new(0);
         let items: Vec<_> = (0..10).collect();
-        assert_eq!(rng.choice(&items), &items[3]);
+        // Stream-stability pin. It was 3 before the B4 fix: `SplitMix32::new(0)`
+        // used to be forced to state 1 (identical to seed 1).
+        assert_eq!(rng.choice(&items), &items[7]);
     }
 }

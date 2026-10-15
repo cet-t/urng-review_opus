@@ -2,7 +2,7 @@ use wrapn::{wrap, wusize};
 
 use crate::{
     _internal::{i2f_bits, u2f_01},
-    SplitMix32,
+    SplitMix64,
     rng::Rng,
 };
 
@@ -31,8 +31,19 @@ const MAG01: [u32; 2] = [0x0, 0x8ebf_d028];
 impl TwistedGFSR {
     /// Creates a new `TwistedGFSR` instance with the given seed.
     pub fn new(seed: u64) -> Self {
-        let mut seedgen = SplitMix32::new(seed as u32);
-        let seed = [0u32; N_GFSR].map(|_| seedgen.nextu_const());
+        // All 64 seed bits are used (the previous `seed as u32` ignored the upper half).
+        let mut seedgen = SplitMix64::new(seed);
+        let mut words = [0u32; N_GFSR + 1];
+        for pair in words.chunks_exact_mut(2) {
+            let v = seedgen.nextu_const();
+            pair[0] = v as u32;
+            pair[1] = (v >> 32) as u32;
+        }
+        let mut seed = [0u32; N_GFSR];
+        seed.copy_from_slice(&words[..N_GFSR]);
+        if seed.iter().all(|&w| w == 0) {
+            seed[0] = 1; // the all-zero state is a fixed point of TT800
+        }
         Self {
             seed,
             index: wrap!(N_GFSR),

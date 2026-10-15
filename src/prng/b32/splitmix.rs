@@ -27,7 +27,7 @@ impl SplitMix32 {
     /// Creates a new `SplitMix32` instance with the given seed.
     pub const fn new(seed: u32) -> Self {
         Self {
-            state: wrap!(seed | 1),
+            state: wrap!(seed),
         }
     }
 

@@ -36,7 +36,7 @@ macro_rules! impl_squares32_variants {
 
                 #[doc = "Builds a generator from `seed` with explicit starting counters (used to split lanes for `x16`)."]
                 fn with_counter(seed: u64, counter: u64) -> Self {
-                    let mut seedgen = SplitMix64::new(seed | 1);
+                    let mut seedgen = SplitMix64::new(seed);
                     Self {
                         c: [<u64x $size>]::from(std::array::from_fn(|i| counter + i as u64)),
                         k: [<u64x $size>]::from([0u64; $size].map(|_| seedgen.nextu())),

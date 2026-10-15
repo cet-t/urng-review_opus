@@ -20,7 +20,7 @@ pub struct SplitMix64 {
 impl SplitMix64 {
     /// Creates a new `SplitMix64` instance with the given seed.
     pub const fn new(seed: u64) -> Self {
-        Self { s: wrap!(seed | 1) }
+        Self { s: wrap!(seed) }
     }
 
     /// Computes the SplitMix64 output for a given raw state word (pure, stateless).

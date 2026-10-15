@@ -30,7 +30,7 @@ macro_rules! impl_pcg32_variants {
             impl [<Pcg32x $size>] {
                 #[doc = "Creates a new generator, seeding every lane's state and increment from `seed`."]
                 pub fn new(seed: u64) -> Self {
-                    let mut seedgen = SplitMix64::new(seed | 1);
+                    let mut seedgen = SplitMix64::new(seed);
                     Self {
                         state: [<u64x $lanes>]::from([0u64; $lanes].map(|_| seedgen.nextu())),
                         inc: [<u64x $lanes>]::from([0u64; $lanes].map(|_| seedgen.nextu())),
