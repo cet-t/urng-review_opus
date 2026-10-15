@@ -1,6 +1,5 @@
 use wrapn::{wrap, wu32};
 
-use crate::prng::b32::SplitMix32;
 use crate::rng::Rng;
 
 /// A xoroshiro64** random number generator.
@@ -23,7 +22,17 @@ pub struct Xoroshiro64Ss {
 impl Xoroshiro64Ss {
     /// Creates a new `Xoroshiro64Ss` instance with the given seed.
     pub const fn new(seed: u32) -> Self {
-        let mut seedgen = SplitMix32::new(seed);
+        Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+    }
+
+    /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+    /// bulk fills; REVIEW B14).
+    #[allow(dead_code)]
+    pub(crate) const fn from_seed64(seed: u64) -> Self {
+        Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+    }
+
+    const fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
 
         Self {
             s: wrap![seedgen.nextu_const(), seedgen.nextu_const()],
@@ -55,7 +64,7 @@ pub use simd::*;
 pub mod simd {
     use std::arch::x86_64::*;
 
-    use crate::prng::b32::SplitMix32;
+    
     use crate::prng::b32::jsf::simd::rotl8;
     use crate::rngv::RngV;
 
@@ -86,7 +95,19 @@ pub mod simd {
         /// The CPU must support AVX2 (nothing beyond AVX2 is used).
         #[target_feature(enable = "avx2")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx2")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx2")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut s0 = [0u32; XOROSHIRO64SSX8];
             let mut s1 = [0u32; XOROSHIRO64SSX8];
             for i in 0..XOROSHIRO64SSX8 {
@@ -155,7 +176,19 @@ pub mod simd {
         /// The CPU must support AVX-512F.
         #[target_feature(enable = "avx512f")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx512f")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx512f")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut s0 = [0u32; XOROSHIRO64SSX16];
             let mut s1 = [0u32; XOROSHIRO64SSX16];
             for i in 0..XOROSHIRO64SSX16 {
@@ -204,6 +237,8 @@ pub mod simd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    use crate::SplitMix32;
 
     crate::safe_test! { Xoroshiro64Ss }
 

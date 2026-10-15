@@ -1,4 +1,4 @@
-﻿//! Regression tests for the C ABI bulk-fill functions (REVIEW B2, B3, B7, B14).
+//! Regression tests for the C ABI bulk-fill functions (REVIEW B2, B3, B7, B14).
 #![cfg(feature = "cabi")]
 #![allow(unused_unsafe)]
 
@@ -523,4 +523,151 @@ fn c_abi_integer_ranges() {
         check!(64, xoshiro256pp, xoshiro256pp_rand_i64s, xoshiro256pp_free, 1u64);
         check!(64, xoshiro256ss, xoshiro256ss_rand_i64s, xoshiro256ss_free, 1u64);
     assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// REVIEW B14: generators with a jump-ahead (SplitMix32 Weyl step, PCG LCG
+/// advance) now fill in parallel yet return exactly the sequential stream.
+#[test]
+fn advanceable_bulk_equals_sequential_stream() {
+    use urng::*;
+    let sizes = [0usize, 1, 7, 16, 131_071, 131_072, 131_073, 300_000];
+    let mut store = vec![0u32; 300_000 + 4];
+    let mut a = SplitMix32::new(21);
+    let ha = splitmix32_new(21);
+    let mut b = Pcg32::new(22);
+    let hb = pcg32_new(22);
+    for (i, &n) in sizes.iter().enumerate() {
+        let off = i % 3;
+        let buf = &mut store[off..off + n];
+        unsafe { splitmix32_next_u32s(ha, buf.as_mut_ptr(), n) };
+        assert!(buf.iter().all(|&x| x == a.nextu()), "splitmix32 call {i}");
+        unsafe { pcg32_next_u32s(hb, buf.as_mut_ptr(), n) };
+        assert!(buf.iter().all(|&x| x == b.nextu()), "pcg32 call {i}");
+    }
+    let mut f = vec![0f32; 1000];
+    unsafe { pcg32_rand_f32s(hb, f.as_mut_ptr(), 1000, -2.0, 2.0) };
+    assert!(f.iter().all(|&x| x == b.randf(-2.0, 2.0)));
+    unsafe {
+        splitmix32_free(ha);
+        pcg32_free(hb);
+    }
+}
+
+/// REVIEW B14: generators without a jump-ahead fill in parallel from
+/// substreams. Every call now draws a 64-bit key and seeds the whole state, so
+/// many small calls no longer regenerate earlier blocks (with 32-bit keys,
+/// 300k calls of 4 words repeated a block 25 times for xoshiro128pp and 51
+/// times for mt19937).
+#[test]
+fn repeated_small_calls_do_not_repeat_blocks() {
+    use urng::*;
+    const CALLS: usize = 200_000;
+    macro_rules! dup_blocks {
+        ($new:ident, $next:ident, $free:ident, $seed:expr) => {{
+            let h = $new($seed);
+            let mut seen = HashSet::with_capacity(CALLS);
+            let mut dups = 0;
+            for _ in 0..CALLS {
+                let mut b = [0u32; 4];
+                unsafe { $next(h, b.as_mut_ptr(), 4) };
+                if !seen.insert(b) {
+                    dups += 1;
+                }
+            }
+            unsafe { $free(h) };
+            dups
+        }};
+    }
+    let results = [
+        ("jsf32", dup_blocks!(jsf32_new, jsf32_next_u32s, jsf32_free, 1)),
+        ("sfc32", dup_blocks!(sfc32_new, sfc32_next_u32s, sfc32_free, 1)),
+        ("xoshiro128pp", dup_blocks!(xoshiro128pp_new, xoshiro128pp_next_u32s, xoshiro128pp_free, 1)),
+        ("xoshiro128ss", dup_blocks!(xoshiro128ss_new, xoshiro128ss_next_u32s, xoshiro128ss_free, 1)),
+        ("xoroshiro64ss", dup_blocks!(xoroshiro64ss_new, xoroshiro64ss_next_u32s, xoroshiro64ss_free, 1)),
+        ("mt19937", dup_blocks!(mt19937_new, mt19937_next_u32s, mt19937_free, 1)),
+        ("sfmt607", dup_blocks!(sfmt607_new, sfmt607_next_u32s, sfmt607_free, 1)),
+    ];
+    let bad: Vec<_> = results.iter().filter(|(_, d)| *d > 0).collect();
+    assert!(bad.is_empty(), "repeated 4-word blocks: {bad:?}");
+
+    // the 32-bit SIMD kernels derive their chunk generators the same way
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    {
+        macro_rules! dup_simd {
+            ($new:ident, $next:ident, $free:ident) => {{
+                let h = $new(1);
+                if h.is_null() {
+                    0
+                } else {
+                    let mut seen = HashSet::with_capacity(CALLS);
+                    let mut dups = 0;
+                    for _ in 0..CALLS {
+                        let mut b = [0u32; 16];
+                        unsafe { $next(h, b.as_mut_ptr(), 16) };
+                        if !seen.insert(b) {
+                            dups += 1;
+                        }
+                    }
+                    unsafe { $free(h) };
+                    dups
+                }
+            }};
+        }
+        let simd = [
+            ("sfc32x4", dup_simd!(sfc32x4_new, sfc32x4_next_u32s, sfc32x4_free)),
+            ("sfc32x8", dup_simd!(sfc32x8_new, sfc32x8_next_u32s, sfc32x8_free)),
+            ("jsf32x16", dup_simd!(jsf32x16_new, jsf32x16_next_u32s, jsf32x16_free)),
+            ("xoroshiro64ssx8", dup_simd!(xoroshiro64ssx8_new, xoroshiro64ssx8_next_u32s, xoroshiro64ssx8_free)),
+            ("xoshiro128ppx16", dup_simd!(xoshiro128ppx16_new, xoshiro128ppx16_next_u32s, xoshiro128ppx16_free)),
+        ];
+        let bad: Vec<_> = simd.iter().filter(|(_, d)| *d > 0).collect();
+        assert!(bad.is_empty(), "repeated 16-word blocks: {bad:?}");
+    }
+
+    // deterministic: the same seed gives the same bulk output
+    let (h1, h2) = (jsf32_new(9), jsf32_new(9));
+    let (mut x, mut y) = (vec![0u32; 300_000], vec![0u32; 300_000]);
+    unsafe {
+        jsf32_next_u32s(h1, x.as_mut_ptr(), x.len());
+        jsf32_next_u32s(h2, y.as_mut_ptr(), y.len());
+        jsf32_free(h1);
+        jsf32_free(h2);
+    }
+    assert_eq!(x, y);
+}
+
+/// REVIEW B14: the Squares counter-based C ABI also returns the sequential
+/// stream; the 8-lane version returns whole Squares32x8::nextu blocks and,
+/// like philox32x4x4, discards the unused tail of the last block.
+#[test]
+fn squares_bulk_equals_sequential_stream() {
+    use urng::*;
+    let sizes = [0usize, 1, 7, 8, 9, 131_073, 300_001];
+    let mut store = vec![0u32; 300_001 + 4];
+    let mut want = Squares32::new(5);
+    let h = squares32_new(5);
+    for (i, &n) in sizes.iter().enumerate() {
+        let buf = &mut store[i % 3..i % 3 + n];
+        unsafe { squares32_next_u32s(h, buf.as_mut_ptr(), n) };
+        assert!(buf.iter().all(|&x| x == want.nextu()), "squares32 call {i}");
+    }
+    unsafe { squares32_free(h) };
+
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    if std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512dq") {
+        let mut v = unsafe { Squares32x8::new(6) };
+        let mut stream = Vec::new();
+        while stream.len() < 500_000 {
+            stream.extend_from_slice(&unsafe { v.nextu() });
+        }
+        let h = squares32x8_new(6);
+        let mut pos = 0;
+        for (i, &n) in sizes.iter().enumerate() {
+            let buf = &mut store[i % 3..i % 3 + n];
+            unsafe { squares32x8_next_u32s(h, buf.as_mut_ptr(), n) };
+            assert!(buf[..] == stream[pos..pos + n], "squares32x8 call {i} (n = {n})");
+            pos += n.div_ceil(8) * 8; // the tail of the last block is discarded
+        }
+        unsafe { squares32x8_free(h) };
+    }
 }

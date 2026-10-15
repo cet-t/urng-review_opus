@@ -1,6 +1,6 @@
 use wrapn::{wrap, wu32};
 
-use crate::{Rng, SplitMix32};
+use crate::Rng;
 
 /// JSF (Jenkins Small Fast) 32-bit RNG implementation.
 ///
@@ -23,7 +23,17 @@ pub struct Jsf32 {
 impl Jsf32 {
     /// Creates a new `Jsf32` instance with the given seed.
     pub const fn new(seed: u32) -> Self {
-        let mut seedgen = SplitMix32::new(seed);
+        Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+    }
+
+    /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+    /// bulk fills; REVIEW B14).
+    #[allow(dead_code)]
+    pub(crate) const fn from_seed64(seed: u64) -> Self {
+        Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+    }
+
+    const fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
         Self {
             a: wrap!(0xf1ea5eed),
             b: wrap!(seedgen.nextu_const()),
@@ -54,7 +64,7 @@ pub use simd::*;
 pub mod simd {
     use std::arch::x86_64::*;
 
-    use crate::{RngV, SplitMix32};
+    use crate::RngV;
 
     /// 8-way SIMD implementation of JSF (Jenkins Small Fast) 32-bit RNG (AVX2).
     ///
@@ -96,7 +106,19 @@ pub mod simd {
         /// longer needs AVX-512VL).
         #[target_feature(enable = "avx2")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx2")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx2")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut sv = [[0u32; JSF32X8]; 3];
             for vals in sv.iter_mut() {
                 for v in vals.iter_mut() {
@@ -169,7 +191,19 @@ pub mod simd {
         /// The CPU must support AVX-512F.
         #[target_feature(enable = "avx512f")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx512f")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx512f")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut sv = [[0u32; JSF32X16]; 3];
             for vals in sv.iter_mut() {
                 for v in vals.iter_mut() {
@@ -214,6 +248,8 @@ pub mod simd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    use crate::SplitMix32;
 
     crate::safe_test! { Jsf32 }
 

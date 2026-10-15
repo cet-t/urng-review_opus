@@ -1,6 +1,5 @@
 
 use crate::prng::b32::SplitMix32;
-use crate::rng::Rng;
 
 /// Creates a new `SplitMix32` instance.
 /// The caller is responsible for freeing the memory using `splitmix32_free`.
@@ -25,7 +24,7 @@ pub unsafe extern "C" fn splitmix32_next_u32s(ptr: *mut SplitMix32, out: *mut u3
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), SplitMix32::new, |r| r.nextu());
+        crate::_internal::par_fill_advance(rng, buffer, SplitMix32::advance, |x| x);
     }
 }
 
@@ -35,7 +34,7 @@ pub unsafe extern "C" fn splitmix32_next_f32s(ptr: *mut SplitMix32, out: *mut f3
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), SplitMix32::new, |r| r.nextf());
+        crate::_internal::par_fill_advance(rng, buffer, SplitMix32::advance, |x| crate::rng::Word::to_f01(x));
     }
 }
 
@@ -54,9 +53,7 @@ pub unsafe extern "C" fn splitmix32_rand_i32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), SplitMix32::new, |r| {
-            r.randi(min, max)
-        });
+        crate::_internal::par_fill_advance(rng, buffer, SplitMix32::advance, |x| crate::rng::Word::to_randi(x, min, max));
     }
 }
 
@@ -72,9 +69,7 @@ pub unsafe extern "C" fn splitmix32_rand_f32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), SplitMix32::new, |r| {
-            r.randf(min, max)
-        });
+        crate::_internal::par_fill_advance(rng, buffer, SplitMix32::advance, |x| crate::rng::Word::to_randf(x, min, max));
     }
 }
 

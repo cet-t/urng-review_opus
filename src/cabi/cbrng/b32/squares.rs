@@ -612,7 +612,9 @@ mod simd {
                     squares32x8_next_u32s_chunk(chunk_idx, chunk, c0, k, lane_offsets);
                 });
 
-            let num_generated = count as u64;
+            // whole 8-word blocks, like Squares32x8::nextu (lane i always keeps key k[i]);
+            // advancing by count paired later counters with the wrong lane keys
+            let num_generated = count.div_ceil(SQUARES32x8) as u64 * SQUARES32x8 as u64;
             for item in c_arr.iter_mut().take(SQUARES32x8) {
                 *item = item.wrapping_add(num_generated);
             }
@@ -657,7 +659,9 @@ mod simd {
                     );
                 });
 
-            let num_generated = count as u64;
+            // whole 8-word blocks, like Squares32x8::nextu (lane i always keeps key k[i]);
+            // advancing by count paired later counters with the wrong lane keys
+            let num_generated = count.div_ceil(SQUARES32x8) as u64 * SQUARES32x8 as u64;
             for item in c_arr.iter_mut().take(SQUARES32x8) {
                 *item = item.wrapping_add(num_generated);
             }
@@ -714,7 +718,9 @@ mod simd {
                     );
                 });
 
-            let num_generated = count as u64;
+            // whole 8-word blocks, like Squares32x8::nextu (lane i always keeps key k[i]);
+            // advancing by count paired later counters with the wrong lane keys
+            let num_generated = count.div_ceil(SQUARES32x8) as u64 * SQUARES32x8 as u64;
             for item in c_arr.iter_mut().take(SQUARES32x8) {
                 *item = item.wrapping_add(num_generated);
             }
@@ -770,7 +776,9 @@ mod simd {
                     );
                 });
 
-            let num_generated = count as u64;
+            // whole 8-word blocks, like Squares32x8::nextu (lane i always keeps key k[i]);
+            // advancing by count paired later counters with the wrong lane keys
+            let num_generated = count.div_ceil(SQUARES32x8) as u64 * SQUARES32x8 as u64;
             for item in c_arr.iter_mut().take(SQUARES32x8) {
                 *item = item.wrapping_add(num_generated);
             }

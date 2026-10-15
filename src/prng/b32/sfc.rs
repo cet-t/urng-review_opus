@@ -1,6 +1,6 @@
 use wrapn::{wrap, wu32};
 
-use crate::{Rng, SplitMix32};
+use crate::Rng;
 
 /// SFC (Small Fast Chaotic) 32-bit RNG implementation.
 ///
@@ -23,7 +23,17 @@ pub struct Sfc32 {
 impl Sfc32 {
     /// Creates a new `Sfc32` instance with the given seed.
     pub const fn new(seed: u32) -> Self {
-        let mut seedgen = SplitMix32::new(seed);
+        Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+    }
+
+    /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+    /// bulk fills; REVIEW B14).
+    #[allow(dead_code)]
+    pub(crate) const fn from_seed64(seed: u64) -> Self {
+        Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+    }
+
+    const fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
         Self {
             a: wrap!(seedgen.nextu_const()),
             b: wrap!(seedgen.nextu_const()),
@@ -56,7 +66,7 @@ pub mod simd {
     use std::arch::x86_64::*;
 
     use crate::prng::b32::jsf::simd::rotl8;
-    use crate::{Rng, SplitMix32, WordV, i2f_bits, u2f_01};
+    use crate::{WordV, i2f_bits, u2f_01};
 
     pub(crate) const SFC32X4: usize = 4;
 
@@ -84,7 +94,17 @@ pub mod simd {
     impl Sfc32x4 {
         /// Creates a new `Sfc32x4` instance with the given seed.
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut a = [0u32; SFC32X4];
             let mut b = [0u32; SFC32X4];
             let mut c = [0u32; SFC32X4];
@@ -180,7 +200,19 @@ pub mod simd {
         /// (the type no longer needs AVX-512VL).
         #[target_feature(enable = "avx2")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx2")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx2")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut a = [0u32; SFC32X8];
             let mut b = [0u32; SFC32X8];
             let mut c = [0u32; SFC32X8];
@@ -267,7 +299,19 @@ pub mod simd {
         /// The caller must ensure the CPU supports the `avx512f` target feature.
         #[target_feature(enable = "avx512f")]
         pub fn new(seed: u32) -> Self {
-            let mut seedgen = SplitMix32::new(seed);
+            Self::from_seed_words(crate::_internal::SeedWords::from_u32(seed))
+        }
+
+        /// Seeds the whole state from a 64-bit seed via SplitMix64 (used by the C ABI
+        /// bulk fills; REVIEW B14).
+        #[target_feature(enable = "avx512f")]
+        #[allow(dead_code)]
+        pub(crate) fn from_seed64(seed: u64) -> Self {
+            Self::from_seed_words(crate::_internal::SeedWords::from_u64(seed))
+        }
+
+        #[target_feature(enable = "avx512f")]
+        fn from_seed_words(mut seedgen: crate::_internal::SeedWords) -> Self {
             let mut a = [0u32; SFC32X16];
             let mut b = [0u32; SFC32X16];
             let mut c = [0u32; SFC32X16];
@@ -332,6 +376,8 @@ mod tests {
     use std::arch::x86_64::*;
 
     use super::*;
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    use crate::SplitMix32;
 
     // (a stray `#[cfg(all(feature = "simd", target_arch = "x86_64"))]` used to hide this test in default builds)
     crate::safe_test! { Sfc32 }

@@ -31,6 +31,11 @@ impl SplitMix32 {
         }
     }
 
+    /// Advances the generator by `delta` steps (the Weyl state moves by`n    /// `delta * gamma`; the period is 2^32).
+    pub fn advance(&mut self, delta: u64) {
+        self.state += (delta as u32).wrapping_mul(0x9E3779B9);
+    }
+
     #[inline(always)]
     pub(crate) const fn nextu_const(&mut self) -> u32 {
         self.state.0.0 = self.state.0.0.wrapping_add(0x9E3779B9);

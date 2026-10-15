@@ -30,7 +30,7 @@ pub unsafe extern "C" fn xoshiro128pp_next_u32s(ptr: *mut Xoshiro128Pp, out: *mu
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| r.nextu());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Pp::from_seed64, |r| r.nextu());
     }
 }
 
@@ -43,7 +43,7 @@ pub unsafe extern "C" fn xoshiro128pp_next_f32s(ptr: *mut Xoshiro128Pp, out: *mu
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| r.nextf());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Pp::from_seed64, |r| r.nextf());
     }
 }
 
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn xoshiro128pp_rand_i32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Pp::from_seed64, |r| {
             r.randi(min, max)
         });
     }
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn xoshiro128pp_rand_f32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Pp::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Pp::from_seed64, |r| {
             r.randf(min, max)
         });
     }
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn xoshiro128ss_next_u32s(ptr: *mut Xoshiro128Ss, out: *mu
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| r.nextu());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Ss::from_seed64, |r| r.nextu());
     }
 }
 
@@ -133,7 +133,7 @@ pub unsafe extern "C" fn xoshiro128ss_next_f32s(ptr: *mut Xoshiro128Ss, out: *mu
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| r.nextf());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Ss::from_seed64, |r| r.nextf());
     }
 }
 
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn xoshiro128ss_rand_i32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Ss::from_seed64, |r| {
             r.randi(min, max)
         });
     }
@@ -176,7 +176,7 @@ pub unsafe extern "C" fn xoshiro128ss_rand_f32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Xoshiro128Ss::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Xoshiro128Ss::from_seed64, |r| {
             r.randf(min, max)
         });
     }
@@ -187,7 +187,7 @@ pub use simd::*;
 
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
-    use crate::_internal::chunk_seed32;
+    
     use crate::RngV;
     use crate::prng::b32::{Xoshiro128Ppx16, Xoshiro128Ssx16};
     use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -204,21 +204,21 @@ mod simd {
     #[cfg(target_arch = "x86_64")]
     #[inline]
     #[target_feature(enable = "avx512f")]
-    unsafe fn xoshiro128ppx16_base_seed(rng: &mut Xoshiro128Ppx16) -> u32 {
+    unsafe fn xoshiro128ppx16_base_seed(rng: &mut Xoshiro128Ppx16) -> u64 {
         let mut tmp = [0u32; XOSHIRO128X16_LANES];
         let v = rng.nextuv();
         unsafe { _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v) };
-        tmp[0]
+        ((tmp[0] as u64) << 32) | tmp[1] as u64
     }
 
     #[cfg(target_arch = "x86_64")]
     #[inline]
     #[target_feature(enable = "avx512f")]
-    unsafe fn xoshiro128ssx16_base_seed(rng: &mut Xoshiro128Ssx16) -> u32 {
+    unsafe fn xoshiro128ssx16_base_seed(rng: &mut Xoshiro128Ssx16) -> u64 {
         let mut tmp = [0u32; XOSHIRO128X16_LANES];
         let v = rng.nextuv();
         unsafe { _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v) };
-        tmp[0]
+        ((tmp[0] as u64) << 32) | tmp[1] as u64
     }
 
     // --- Xoshiro128++ x16 ---
@@ -452,7 +452,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ppx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ppx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoshiro128ppx16_next_u32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -481,7 +481,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ppx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ppx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoshiro128ppx16_next_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -515,7 +515,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ppx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ppx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     xoshiro128ppx16_rand_i32s_chunk(
@@ -550,7 +550,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ppx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ppx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_mult = _mm512_set1_ps(max - min);
             let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
                     let v_min = _mm512_set1_ps(min);
@@ -795,7 +795,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoshiro128ssx16_next_u32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -824,7 +824,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoshiro128ssx16_next_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -858,7 +858,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     xoshiro128ssx16_rand_i32s_chunk(
@@ -893,7 +893,7 @@ mod simd {
                 .par_chunks_mut(XOSHIRO128X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoshiro128Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoshiro128Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_mult = _mm512_set1_ps(max - min);
             let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
                     let v_min = _mm512_set1_ps(min);

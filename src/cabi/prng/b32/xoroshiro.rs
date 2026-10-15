@@ -28,7 +28,7 @@ const XOROSHIRO64SS_PAR_CHUNK: usize = 0x20000;
 /// outputs (64 bytes for 4-byte `T`) are batched per generator call so
 /// the non-temporal path can stream whole cache lines.
 #[inline(always)]
-fn xoro64ss_fill<T, M>(buffer: &mut [T], seed: u32, step: M)
+fn xoro64ss_fill<T, M>(buffer: &mut [T], seed: u64, step: M)
 where
     T: Copy + Default + Send,
     M: Fn(&mut Xoroshiro64Ss) -> T + Sync,
@@ -38,7 +38,7 @@ where
         .par_chunks_mut(XOROSHIRO64SS_PAR_CHUNK)
         .enumerate()
         .for_each(|(chunk_idx, chunk)| {
-            let mut local_rng = Xoroshiro64Ss::new(crate::_internal::chunk_seed32(seed, chunk_idx));
+            let mut local_rng = Xoroshiro64Ss::from_seed64(crate::_internal::chunk_seed64(seed, chunk_idx));
             unsafe {
                 fill_chunk_auto(chunk, nt, || {
                     let mut out = [T::default(); 16];
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn xoroshiro64ss_next_u32s(ptr: *mut Xoroshiro64Ss, out: *
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let seed = rng.nextu();
+        let seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.nextu());
     }
@@ -71,7 +71,7 @@ pub unsafe extern "C" fn xoroshiro64ss_next_f32s(ptr: *mut Xoroshiro64Ss, out: *
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let seed = rng.nextu();
+        let seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.nextf());
     }
@@ -93,7 +93,7 @@ pub unsafe extern "C" fn xoroshiro64ss_rand_i32s(
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let seed = rng.nextu();
+        let seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.randi(min, max));
     }
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn xoroshiro64ss_rand_f32s(
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let seed = rng.nextu();
+        let seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
         xoro64ss_fill(buffer, seed, |r| r.randf(min, max));
     }
@@ -126,7 +126,6 @@ mod simd {
     #[cfg(target_arch = "x86_64")]
     use crate::prng::b32::xoroshiro::{XOROSHIRO64SSX8, XOROSHIRO64SSX16};
     use crate::{
-        _internal::chunk_seed32,
         RngV,
         prng::b32::xoroshiro::{Xoroshiro64Ssx8, Xoroshiro64Ssx16},
     };
@@ -401,13 +400,13 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx8::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx8::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx8_next_u32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -430,13 +429,13 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx8::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx8::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx8_next_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -464,7 +463,7 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let v_range = _mm256_set1_epi32(crate::rngv::scale32(min, max));
             let v_min = _mm256_set1_epi32(min);
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -472,7 +471,7 @@ mod simd {
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx8::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx8::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx8_rand_i32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -499,7 +498,7 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX8];
             _mm256_storeu_si256(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let v_mult = _mm256_set1_ps(max - min);
             let v_hi = _mm256_set1_ps(crate::_internal::hi_f32(min, max));
             let v_min = _mm256_set1_ps(min);
@@ -508,7 +507,7 @@ mod simd {
                 .par_chunks_mut(XOROSHIRO64SSX8_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx8::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx8::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx8_rand_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -785,13 +784,13 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx16_next_u32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -814,13 +813,13 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx16_next_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -848,7 +847,7 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
             let v_min = _mm512_set1_epi32(min);
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
@@ -856,7 +855,7 @@ mod simd {
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx16_rand_i32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -883,7 +882,7 @@ mod simd {
             let Some(rng) = ptr.as_mut() else { return };
             let mut tmp = [0u32; XOROSHIRO64SSX16];
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, rng.nextuv());
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
             let v_mult = _mm512_set1_ps(max - min);
             let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
             let v_min = _mm512_set1_ps(min);
@@ -892,7 +891,7 @@ mod simd {
                 .par_chunks_mut(XOROSHIRO64SSX16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Xoroshiro64Ssx16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Xoroshiro64Ssx16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     xoroshiro64ssx16_rand_f32s_chunk(
                         &mut local_rng,
                         chunk,

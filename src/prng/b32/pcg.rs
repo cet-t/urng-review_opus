@@ -33,6 +33,26 @@ impl Pcg32 {
             inc: wrap!(seedgen.nextu_const() | 1),
         }
     }
+
+    /// Advances the generator by `delta` steps in O(log delta), as if `nextu`
+    /// had been called `delta` times (Brown, "Random number generation with
+    /// arbitrary strides", 1994; `pcg32_advance` in the PCG reference code).
+    pub fn advance(&mut self, delta: u64) {
+        const MULT: u64 = 6364136223846793005;
+        let (mut acc_mult, mut acc_plus) = (1u64, 0u64);
+        let (mut cur_mult, mut cur_plus) = (MULT, *self.inc);
+        let mut d = delta;
+        while d > 0 {
+            if d & 1 != 0 {
+                acc_mult = acc_mult.wrapping_mul(cur_mult);
+                acc_plus = acc_plus.wrapping_mul(cur_mult).wrapping_add(cur_plus);
+            }
+            cur_plus = cur_mult.wrapping_add(1).wrapping_mul(cur_plus);
+            cur_mult = cur_mult.wrapping_mul(cur_mult);
+            d >>= 1;
+        }
+        self.state = wrap!(acc_mult.wrapping_mul(*self.state).wrapping_add(acc_plus));
+    }
 }
 
 impl Rng for Pcg32 {
@@ -229,5 +249,31 @@ mod tests {
                 assert_eq!(got[i], l.nextu());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod advance_tests {
+    use super::*;
+
+    #[test]
+    fn advance_equals_stepping() {
+        for delta in [0u64, 1, 2, 3, 1000, 65_537] {
+            let mut a = Pcg32::new(17);
+            let mut b = a;
+            for _ in 0..delta {
+                let _ = b.nextu();
+            }
+            a.advance(delta);
+            for _ in 0..16 {
+                assert_eq!(a.nextu(), b.nextu(), "delta {delta}");
+            }
+        }
+        // a full period (2^64 steps) returns to the start
+        let mut a = Pcg32::new(3);
+        let b = a;
+        a.advance(u64::MAX);
+        a.advance(1);
+        assert_eq!((a.state, a.inc), (b.state, b.inc));
     }
 }

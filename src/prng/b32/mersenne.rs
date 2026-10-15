@@ -94,6 +94,22 @@ impl Mt19937 {
         Self::from_init_genrand(seedgen.nextu())
     }
 
+    /// Seeds all 624 state words from a 64-bit seed via SplitMix64 (C ABI bulk
+    /// fills; REVIEW B14: `new` reaches only 2^32 states). The MSB of `mt[0]`
+    /// is set as in the reference `init_by_array`, so the state is never zero.
+    #[allow(dead_code)]
+    pub(crate) fn from_seed64(seed: u64) -> Self {
+        let mut sg = crate::prng::b64::SplitMix64::new(seed);
+        let mut mt = [wrap!(0u32); MT32_N];
+        for pair in mt.chunks_mut(2) {
+            let x = sg.nextu_const();
+            pair[0] = wrap!(x as u32);
+            pair[1] = wrap!((x >> 32) as u32);
+        }
+        mt[0] |= MT32_UPPER_MASK;
+        Self { mt, mti: wrap!(MT32_N) }
+    }
+
     /// Creates an `Mt19937` seeded exactly like the reference `init_genrand`
     /// (Matsumoto & Nishimura, mt19937ar.c), i.e. like C++ `std::mt19937(seed)`.
     ///
@@ -254,7 +270,16 @@ impl Sfmt19937 {
     /// recurrence, so outputs differ from the reference implementation; use
     /// [`Sfmt19937::from_init_gen_rand`] for reference-compatible seeding.
     pub fn new(seed: u32) -> Self {
-        let mut seedgen = sm64_from_seed32!(seed);
+        Self::from_sm64(sm64_from_seed32!(seed))
+    }
+
+    /// Seeds the whole state from a 64-bit seed (C ABI bulk fills; REVIEW B14).
+    #[allow(dead_code)]
+    pub(crate) fn from_seed64(seed: u64) -> Self {
+        Self::from_sm64(crate::prng::b64::SplitMix64::new(seed))
+    }
+
+    fn from_sm64(mut seedgen: crate::prng::b64::SplitMix64) -> Self {
 
         // Initialize state using u32 array for simplicity
         let mut raw_state = [0u32; SFMT_N << 2];
@@ -442,7 +467,16 @@ macro_rules! define_sfmt_variant {
             impl [<Sfmt $mexp>] {
                 #[doc = concat!("Creates a new `", stringify!([<Sfmt $mexp>]), "` instance with the given seed.")]
                 pub fn new(seed: u32) -> Self {
-                    let mut seedgen = sm64_from_seed32!(seed);
+                    Self::from_sm64(sm64_from_seed32!(seed))
+                }
+
+                /// Seeds the whole state from a 64-bit seed (C ABI bulk fills; REVIEW B14).
+                #[allow(dead_code)]
+                pub(crate) fn from_seed64(seed: u64) -> Self {
+                    Self::from_sm64(crate::prng::b64::SplitMix64::new(seed))
+                }
+
+                fn from_sm64(mut seedgen: crate::prng::b64::SplitMix64) -> Self {
                     let mut raw_state = [0u32; $n << 2];
                     for i in 0..($n * 2) {
                         let s = seedgen.nextu();

@@ -27,9 +27,9 @@ pub unsafe extern "C" fn jsf32_next_u32s(ptr: *mut Jsf32, out: *mut u32, count: 
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let seed = rng.nextu();
+        let seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, seed, Jsf32::new, |r| r.nextu());
+        crate::_internal::par_fill_reseed32(buffer, seed, Jsf32::from_seed64, |r| r.nextu());
     }
 }
 
@@ -41,9 +41,9 @@ pub unsafe extern "C" fn jsf32_next_f32s(ptr: *mut Jsf32, out: *mut f32, count: 
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let base_seed = rng.nextu();
+        let base_seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.nextf());
+        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::from_seed64, |r| r.nextf());
     }
 }
 
@@ -64,9 +64,9 @@ pub unsafe extern "C" fn jsf32_rand_i32s(
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let base_seed = rng.nextu();
+        let base_seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.randi(min, max));
+        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::from_seed64, |r| r.randi(min, max));
     }
 }
 
@@ -84,9 +84,9 @@ pub unsafe extern "C" fn jsf32_rand_f32s(
     }
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
-        let base_seed = rng.nextu();
+        let base_seed = crate::_internal::key64(rng);
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::new, |r| r.randf(min, max));
+        crate::_internal::par_fill_reseed32(buffer, base_seed, Jsf32::from_seed64, |r| r.randf(min, max));
     }
 }
 
@@ -95,7 +95,7 @@ pub use simd::*;
 
 #[cfg(all(feature = "simd", target_arch = "x86_64"))]
 mod simd {
-    use crate::_internal::chunk_seed32;
+    
     #[cfg(target_arch = "x86_64")]
     use crate::RngV;
     use crate::prng::b32::jsf::{JSF32X16, Jsf32x16};
@@ -399,14 +399,14 @@ mod simd {
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
 
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Jsf32x16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     jsf32x16_next_u32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -427,14 +427,14 @@ mod simd {
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
 
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Jsf32x16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     jsf32x16_next_f32s_chunk(
                         &mut local_rng,
                         chunk,
@@ -464,14 +464,14 @@ mod simd {
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
 
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Jsf32x16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_range = _mm512_set1_epi32(crate::rngv::scale32(min, max));
                     let v_min = _mm512_set1_epi32(min);
                     jsf32x16_rand_i32s_chunk(
@@ -502,14 +502,14 @@ mod simd {
             let mut tmp = [0u32; JSF32X16];
             let v = rng.nextuv();
             _mm512_storeu_si512(tmp.as_mut_ptr() as *mut _, v);
-            let base_seed = tmp[0];
+            let base_seed = ((tmp[0] as u64) << 32) | tmp[1] as u64;
 
             let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
             buffer
                 .par_chunks_mut(JSF32X16_PAR_CHUNK)
                 .enumerate()
                 .for_each(|(chunk_idx, chunk)| {
-                    let mut local_rng = Jsf32x16::new(chunk_seed32(base_seed, chunk_idx));
+                    let mut local_rng = Jsf32x16::from_seed64(crate::_internal::chunk_seed64(base_seed, chunk_idx));
                     let v_mult = _mm512_set1_ps(max - min);
             let v_hi = _mm512_set1_ps(crate::_internal::hi_f32(min, max));
                     let v_min = _mm512_set1_ps(min);

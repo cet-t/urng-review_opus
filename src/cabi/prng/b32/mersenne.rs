@@ -31,7 +31,7 @@ pub unsafe extern "C" fn mt19937_next_u32s(ptr: *mut Mt19937, out: *mut u32, cou
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| r.nextu());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Mt19937::from_seed64, |r| r.nextu());
     }
 }
 
@@ -41,7 +41,7 @@ pub unsafe extern "C" fn mt19937_next_f32s(ptr: *mut Mt19937, out: *mut f32, cou
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| r.nextf());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Mt19937::from_seed64, |r| r.nextf());
     }
 }
 
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn mt19937_rand_i32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Mt19937::from_seed64, |r| {
             r.randi(min, max)
         });
     }
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn mt19937_rand_f32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Mt19937::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Mt19937::from_seed64, |r| {
             r.randf(min, max)
         });
     }
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn sfmt19937_next_u32s(ptr: *mut Sfmt19937, out: *mut u32,
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| r.nextu());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Sfmt19937::from_seed64, |r| r.nextu());
     }
 }
 
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn sfmt19937_next_f32s(ptr: *mut Sfmt19937, out: *mut f32,
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| r.nextf());
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Sfmt19937::from_seed64, |r| r.nextf());
     }
 }
 
@@ -139,7 +139,7 @@ pub unsafe extern "C" fn sfmt19937_rand_i32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Sfmt19937::from_seed64, |r| {
             r.randi(min, max)
         });
     }
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn sfmt19937_rand_f32s(
     unsafe {
         let Some(rng) = ptr.as_mut() else { return };
         let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-        crate::_internal::par_fill_reseed32(buffer, rng.nextu(), Sfmt19937::new, |r| {
+        crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), Sfmt19937::from_seed64, |r| {
             r.randf(min, max)
         });
     }
@@ -195,7 +195,7 @@ macro_rules! impl_sfmt_cabi {
             unsafe {
                 let Some(rng) = ptr.as_mut() else { return };
                 let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-                crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| r.nextu());
+                crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), <$ty>::from_seed64, |r| r.nextu());
             }
         }
 
@@ -204,7 +204,7 @@ macro_rules! impl_sfmt_cabi {
             unsafe {
                 let Some(rng) = ptr.as_mut() else { return };
                 let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-                crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| r.nextf());
+                crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), <$ty>::from_seed64, |r| r.nextf());
             }
         }
 
@@ -222,7 +222,7 @@ macro_rules! impl_sfmt_cabi {
             unsafe {
                 let Some(rng) = ptr.as_mut() else { return };
                 let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-                crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| {
+                crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), <$ty>::from_seed64, |r| {
                     r.randi(min, max)
                 });
             }
@@ -239,7 +239,7 @@ macro_rules! impl_sfmt_cabi {
             unsafe {
                 let Some(rng) = ptr.as_mut() else { return };
                 let buffer = match crate::_internal::out_slice(out, count) { Some(b) => b, None => return };
-                crate::_internal::par_fill_reseed32(buffer, rng.nextu(), <$ty>::new, |r| {
+                crate::_internal::par_fill_reseed32(buffer, crate::_internal::key64(rng), <$ty>::from_seed64, |r| {
                     r.randf(min, max)
                 });
             }

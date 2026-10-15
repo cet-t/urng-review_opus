@@ -380,6 +380,77 @@ pub(crate) fn hi_f64(min: f64, max: f64) -> f64 {
     if max > min { max.next_down() } else { f64::INFINITY }
 }
 
+/// The 32-bit word source used by the 32-bit generators' constructors.
+///
+/// `from_u32(seed)` yields exactly the `SplitMix32::new(seed)` stream, so every
+/// `new(seed)` keeps its outputs. `from_u64(seed)` yields both halves of a
+/// `SplitMix64::new(seed)` stream, so `from_seed64` constructors reach far more
+/// than 2^32 initial states. The C ABI bulk fills seed their per-chunk
+/// generators that way (REVIEW B14: with 32-bit chunk seeds, repeated calls
+/// regenerated identical blocks after about 2^16 chunk instantiations).
+#[derive(Clone, Copy)]
+pub(crate) struct SeedWords {
+    sm32: crate::prng::b32::SplitMix32,
+    sm64: crate::prng::b64::SplitMix64,
+    wide: bool,
+    /// The unused high half of the last 64-bit output.
+    pending: Option<u32>,
+}
+
+impl SeedWords {
+    pub(crate) const fn from_u32(seed: u32) -> Self {
+        Self {
+            sm32: crate::prng::b32::SplitMix32::new(seed),
+            sm64: crate::prng::b64::SplitMix64::new(0),
+            wide: false,
+            pending: None,
+        }
+    }
+
+    pub(crate) const fn from_u64(seed: u64) -> Self {
+        Self {
+            sm32: crate::prng::b32::SplitMix32::new(0),
+            sm64: crate::prng::b64::SplitMix64::new(seed),
+            wide: true,
+            pending: None,
+        }
+    }
+
+    #[inline]
+    pub(crate) const fn nextu_const(&mut self) -> u32 {
+        if !self.wide {
+            return self.sm32.nextu_const();
+        }
+        if let Some(hi) = self.pending.take() {
+            return hi;
+        }
+        let x = self.sm64.nextu_const();
+        self.pending = Some((x >> 32) as u32);
+        x as u32
+    }
+
+    #[inline]
+    pub(crate) const fn nextu(&mut self) -> u32 {
+        self.nextu_const()
+    }
+}
+
+/// A 64-bit key drawn from a 32-bit generator (two words, high word first).
+#[cfg(feature = "cabi")]
+#[inline]
+pub(crate) fn key64<R: crate::rng::Rng<Word = u32>>(rng: &mut R) -> u64 {
+    let hi = rng.nextu() as u64;
+    (hi << 32) | rng.nextu() as u64
+}
+
+/// Decorrelated per-chunk 64-bit seed: distinct chunk indices give distinct
+/// seeds for a fixed key (the Weyl step is odd and the finalizer bijective).
+#[cfg(feature = "cabi")]
+#[inline]
+pub(crate) fn chunk_seed64(key: u64, chunk_idx: usize) -> u64 {
+    crate::prng::b64::SplitMix64::compute(key.wrapping_add((chunk_idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)))
+}
+
 /// A counter-mode block generator whose [`crate::rng::Rng::nextu`] stream is
 /// `block(ctr), block(ctr + 1), ...` served word by word through a ring buffer.
 #[cfg(feature = "cabi")]
@@ -452,19 +523,58 @@ where
     }
 }
 
-/// Parallel bulk fill for sequential 32-bit-seeded RNGs: each 512KB chunk
-/// runs its own RNG reseeded via [`chunk_seed32`], 16 outputs are batched
-/// per generator call (64B for 4-byte `T`), and stores are size-adaptive
-/// (cached for L3-resident buffers, non-temporal for larger ones).
+/// Bulk fill for generators with an O(log n) jump-ahead (REVIEW B14): every
+/// chunk starts from a copy of `rng` advanced to its offset, so the output is
+/// exactly the sequential `nextu` stream; `rng` ends advanced past the buffer.
+#[cfg(feature = "cabi")]
+pub(crate) fn par_fill_advance<R, T, A, M>(rng: &mut R, buffer: &mut [T], advance: A, map: M)
+where
+    R: crate::rng::Rng + Clone + Sync,
+    T: Copy + Default + Send,
+    A: Fn(&mut R, u64) + Sync,
+    M: Fn(R::Word) -> T + Sync,
+{
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    use rayon::slice::ParallelSliceMut;
+    const PAR_CHUNK: usize = 0x20000;
+    let nt = prefer_nt::<T>(buffer.len());
+    let start: &R = rng;
+    buffer
+        .par_chunks_mut(PAR_CHUNK)
+        .enumerate()
+        .for_each(|(chunk_idx, chunk)| {
+            let mut r = start.clone();
+            advance(&mut r, (chunk_idx * PAR_CHUNK) as u64);
+            unsafe {
+                fill_chunk_auto(chunk, nt, || {
+                    let mut out = [T::default(); 16];
+                    for v in &mut out {
+                        *v = map(r.nextu());
+                    }
+                    out
+                });
+            }
+        });
+    advance(rng, buffer.len() as u64);
+}
+
+/// Parallel bulk fill for 32-bit generators without a jump-ahead. Each 512KB
+/// chunk runs its own generator built by `new_rng(chunk_seed64(key, idx))`,
+/// which must seed the *whole* state from the 64-bit seed (`from_seed64`).
+/// The output is a set of substreams, not the handle's sequential stream; the
+/// caller draws a fresh 64-bit `key` from the handle on every call
+/// (REVIEW B14: 32-bit keys and chunk seeds made repeated calls regenerate
+/// identical blocks). 16 outputs are batched per generator call and stores
+/// are size-adaptive (cached for L3-resident buffers, non-temporal above).
 #[cfg(feature = "cabi")]
 pub(crate) fn par_fill_reseed32<R, T, NF, SF>(
     buffer: &mut [T],
-    base_seed: u32,
+    key: u64,
     new_rng: NF,
     step: SF,
 ) where
     T: Copy + Default + Send,
-    NF: Fn(u32) -> R + Sync,
+    NF: Fn(u64) -> R + Sync,
     SF: Fn(&mut R) -> T + Sync,
 {
     use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -475,7 +585,7 @@ pub(crate) fn par_fill_reseed32<R, T, NF, SF>(
         .par_chunks_mut(PAR_CHUNK)
         .enumerate()
         .for_each(|(chunk_idx, chunk)| {
-            let mut rng = new_rng(chunk_seed32(base_seed, chunk_idx));
+            let mut rng = new_rng(chunk_seed64(key, chunk_idx));
             unsafe {
                 fill_chunk_auto(chunk, nt, || {
                     let mut out = [T::default(); 16];
@@ -487,7 +597,6 @@ pub(crate) fn par_fill_reseed32<R, T, NF, SF>(
             }
         });
 }
-
 /// 64-bit counterpart of [`par_fill_reseed32`]: 8 outputs per batch
 /// (64B for 8-byte `T`), chunk seeds decorrelated by golden-ratio steps
 /// plus the SplitMix64 finalizer.
@@ -526,18 +635,6 @@ pub(crate) fn par_fill_reseed64<R, T, NF, SF>(
         });
 }
 
-/// Derives a decorrelated per-chunk seed for parallel buffer fills
-/// (golden-ratio sequence + 64-bit avalanche mix).
-#[inline]
-pub(crate) fn chunk_seed32(base_seed: u32, chunk_idx: usize) -> u32 {
-    let x = base_seed.wrapping_add((chunk_idx as u32).wrapping_mul(0x9E37_79B9));
-    let mut z = x as u64;
-    z ^= z >> 16;
-    z = z.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
-    z ^= z >> 16;
-    z = z.wrapping_mul(0xC4CE_B9FE_1A85_EC53);
-    (z ^ (z >> 16)) as u32
-}
 
 #[cfg(test)]
 mod tests {
