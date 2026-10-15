@@ -3,6 +3,9 @@ use wrapn::{wrap, wu32};
 use crate::prng::b32::SplitMix32;
 use crate::rng::Rng;
 
+/// Substitute for the all-zero xorshift state (any non-zero value works).
+const XORSHIFT32_ZERO_STATE_SUBSTITUTE: u32 = 0x6C07_8965;
+
 // --- Xorshift32 ---
 
 /// A 32-bit Xorshift random number generator.
@@ -24,10 +27,16 @@ pub struct Xorshift32 {
 
 impl Xorshift32 {
     /// Creates a new `Xorshift32` instance with the given seed.
+    ///
+    /// The all-zero state is a fixed point of xorshift; the seeds that SplitMix32
+    /// maps to it (0x61C88647, 0xD7BDEF1B, 0xF7AA06C3) are remapped to a fixed
+    /// non-zero state (REVIEW B21: they produced only zeros). Every other seed
+    /// keeps its stream.
     pub const fn new(seed: u32) -> Self {
         let mut sm = SplitMix32::new(seed);
+        let a = sm.nextu_const();
         Self {
-            a: wrap!(sm.nextu_const()),
+            a: wrap!(if a == 0 { XORSHIFT32_ZERO_STATE_SUBSTITUTE } else { a }),
         }
     }
 }
@@ -68,7 +77,8 @@ pub struct Xorshift128 {
 impl Xorshift128 {
     /// Creates a new `Xorshift128` instance.
     ///
-    /// Each seed element is OR-ed with 1 to prevent an all-zero state.
+    /// The four state words come from consecutive SplitMix32 outputs, which are
+    /// never all zero, so the all-zero fixed point cannot occur.
     pub const fn new(seed: u32) -> Self {
         let mut sm = SplitMix32::new(seed);
         Self {
@@ -171,6 +181,18 @@ pub mod simd {
 
 #[cfg(test)]
 mod tests {
+    /// REVIEW B21: these seeds made SplitMix32 produce the all-zero state, so
+    /// Xorshift32 output only zeros.
+    #[test]
+    fn xorshift32_has_no_all_zero_seed() {
+        for seed in [0x61C8_8647u32, 0xD7BD_EF1B, 0xF7AA_06C3] {
+            assert_eq!(crate::SplitMix32::new(seed).nextu(), 0, "{seed:#x} is a zero-state seed");
+            let mut g = Xorshift32::new(seed);
+            assert!((0..8).any(|_| g.nextu() != 0), "{seed:#x}");
+        }
+        // other seeds are unchanged
+        assert_eq!(*Xorshift32::new(1).a, crate::SplitMix32::new(1).nextu());
+    }
     use super::*;
 
     crate::safe_test! {
