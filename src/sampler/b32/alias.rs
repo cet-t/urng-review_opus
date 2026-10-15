@@ -29,14 +29,18 @@ pub struct Alias32<'a, R: Rng<Word = u32> + 'a> {
 
 impl<'a, R: Rng<Word = u32> + 'a> Alias32<'a, R> {
     /// Creates a new sampler with the given random number generator and weights.
+    ///
+    /// # Panics
+    ///
+    /// If the weights are empty, negative, non-finite or sum to zero.
     pub fn new(rng: &'a mut R, weights: &[f32]) -> Self {
         let (prob, alias) = Self::build(weights);
         Self { rng, prob, alias }
     }
 
     fn build(weights: &[f32]) -> (Vec<f32>, Vec<usize>) {
+        let total = crate::sampler::validate_weights_f32(weights);
         let n = weights.len();
-        let total: f32 = weights.iter().sum();
         let scale = n as f32 / total;
 
         let mut prob = vec![0.0f32; n];
@@ -101,4 +105,31 @@ mod tests {
         let ones = (0..100).filter(|_| sampler.sample() == 1).count();
         assert_eq!(ones, 91);
     }
-}
+
+    struct Const(u32);
+    impl Rng for Const {
+        type Word = u32;
+        fn nextu(&mut self) -> u32 {
+            self.0
+        }
+    }
+
+    /// REVIEW B15: empty weights used to panic with an arithmetic error.
+    #[test]
+    #[should_panic(expected = "must not be empty")]
+    fn alias32_rejects_empty_weights() {
+        let mut c = Const(0);
+        let _ = Alias32::new(&mut c, &[]);
+    }
+
+    #[test]
+    fn alias32_never_selects_zero_weight() {
+        let mut rng = <crate::prng::b32::Mt19937>::new(4);
+        let mut s = Alias32::new(&mut rng, &[0.0, 2.0, 0.0, 6.0, 0.0]);
+        let mut counts = [0usize; 5];
+        for _ in 0..40_000 {
+            counts[s.sample()] += 1;
+        }
+        assert_eq!(counts[0] + counts[2] + counts[4], 0, "{counts:?}");
+        assert!((counts[3] as f64 / counts[1] as f64 - 3.0).abs() < 0.2, "{counts:?}");
+    }}
