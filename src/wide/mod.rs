@@ -1,12 +1,21 @@
 //! Wide (portable SIMD) random number generators.
 //!
-//! This module provides SIMD-accelerated variants of the generators in [`crate::prng::b32`],
+//! This module provides SIMD-accelerated variants of the 32-bit generators in the crate root,
 //! built on top of the [`wide`] crate. Each type (e.g. `Jsf32x8`, `Sfc32x16`) produces
 //! `$size` values per call using `u32x4` / `u32x8` / `u32x16` lane types, making them a
 //! portable alternative to the `std::arch`-based SIMD implementations.
 //!
-//! Each generator implements [`WRng`], which supplies `nextf`, `randi` and `randf`
+//! Each generator implements [`RngW`], which supplies `nextf`, `randi` and `randf`
 //! as default methods derived from the type's own `nextu`.
+//!
+//! ```
+//! use urng::wide::{RngW, Xoshiro128Ppx16};
+//!
+//! let mut rng = Xoshiro128Ppx16::new(1);
+//! let values: [u32; 16] = rng.nextu();
+//! let floats: [f32; 16] = rng.nextf();
+//! # let _ = (values, floats);
+//! ```
 mod _internal;
 mod jsf;
 mod pcg;

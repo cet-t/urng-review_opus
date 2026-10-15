@@ -1,4 +1,4 @@
-#![cfg_attr(not(doctest), doc = include_str!("../Readme.md"))]
+#![doc = include_str!("../README.md")]
 #![allow(ambiguous_glob_reexports)]
 
 mod rng;
@@ -31,6 +31,9 @@ pub use crate::shuffle::*;
 
 mod choice;
 pub use crate::choice::*;
+
+#[cfg(test)]
+pub(crate) mod _reftest;
 
 pub(crate) mod _internal;
 pub(crate) use crate::_internal::*;

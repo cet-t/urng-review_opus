@@ -4,12 +4,11 @@ use crate::rng::Word;
 
 /// A wide random number generator producing `WIDTH` [`Word`]s per call.
 ///
-/// Mirrors [`crate::rng::Rng`]: implementors provide only [`nextu`](WRng::nextu),
+/// Mirrors [`crate::rng::Rng`]: implementors provide only [`nextu`](RngW::nextu),
 /// and the ranged/float draws are supplied as defaults derived from the
 /// per-lane [`Word`] conversions, so the numeric formulas stay defined in
-/// exactly one place. `WIDTH` is a named const generic (bind it as
-/// `WRng<WIDTH = 8>`), so it reads at call sites the same way an associated
-/// item would.
+/// exactly one place. `WIDTH` is a const generic parameter (bind it as
+/// `RngW<8>`).
 pub trait RngW<const WIDTH: usize> {
     /// The unsigned output word this generator produces, per lane.
     type Word: crate::rng::Word;
