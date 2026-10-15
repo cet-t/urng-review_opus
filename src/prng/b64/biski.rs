@@ -121,9 +121,12 @@ pub mod simd {
                     _mm512_rol_epi64(self.mix, 16),
                     _mm512_rol_epi64(self.loop_mix, 40),
                 );
+                // loop_mix' = fast_loop ^ mix from the *old* values (as in Biski64;
+                // the previous code used the updated ones, so lanes diverged from
+                // the scalar generator after one step)
+                self.loop_mix = _mm512_xor_si512(self.fast_loop, self.mix);
                 self.fast_loop = fast_loop;
                 self.mix = mix;
-                self.loop_mix = _mm512_xor_si512(self.fast_loop, self.mix);
 
                 let mut res = [0u64; 8];
                 _mm512_storeu_si512(res.as_mut_ptr() as *mut __m512i, output);
@@ -192,6 +195,28 @@ mod tests {
 
     crate::safe_test! { Biski64 }
 
-    #[cfg(all(feature = "simd", target_feature = "avx512f"))]
-    crate::unsafe_test! { Biski64x8 }
+    /// REVIEW B12: every lane of Biski64x8 must equal scalar Biski64 (lane 0 is
+    /// exactly `Biski64::new(seed)`).
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[test]
+    fn biski64x8_lanes_match_scalar() {
+        if !std::arch::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let mut sg = SplitMix64::new(99);
+        let mut lanes: Vec<Biski64> = (0..8)
+            .map(|_| Biski64 {
+                fast_loop: wrap!(sg.nextu_const()),
+                mix: wrap!(sg.nextu_const()),
+                loop_mix: wrap!(sg.nextu_const()),
+            })
+            .collect();
+        let mut v = Biski64x8::new(99);
+        for _ in 0..10_000 {
+            let got = unsafe { v.nextu() };
+            for (i, l) in lanes.iter_mut().enumerate() {
+                assert_eq!(got[i], l.nextu());
+            }
+        }
+    }
 }

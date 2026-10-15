@@ -1,4 +1,4 @@
-﻿use std::slice::from_raw_parts_mut;
+use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -197,6 +197,13 @@ mod simd {
                 let r3 = _mm512_add_epi64(m3, lm3);
                 let r4 = _mm512_add_epi64(m4, lm4);
                 let r5 = _mm512_add_epi64(m5, lm5);
+                // loop_mix' = fast_loop ^ mix, from the *old* values (as in scalar Biski64)
+                let lm0_next = _mm512_xor_si512(fl0, m0);
+                let lm1_next = _mm512_xor_si512(fl1, m1);
+                let lm2_next = _mm512_xor_si512(fl2, m2);
+                let lm3_next = _mm512_xor_si512(fl3, m3);
+                let lm4_next = _mm512_xor_si512(fl4, m4);
+                let lm5_next = _mm512_xor_si512(fl5, m5);
                 // fast_loop' = fast_loop + INC
                 fl0 = _mm512_add_epi64(fl0, inc);
                 fl1 = _mm512_add_epi64(fl1, inc);
@@ -211,13 +218,13 @@ mod simd {
                 m3 = _mm512_add_epi64(_mm512_rol_epi64(m3, 16), _mm512_rol_epi64(lm3, 40));
                 m4 = _mm512_add_epi64(_mm512_rol_epi64(m4, 16), _mm512_rol_epi64(lm4, 40));
                 m5 = _mm512_add_epi64(_mm512_rol_epi64(m5, 16), _mm512_rol_epi64(lm5, 40));
-                // loop_mix' = fast_loop' ^ mix'
-                lm0 = _mm512_xor_si512(fl0, m0);
-                lm1 = _mm512_xor_si512(fl1, m1);
-                lm2 = _mm512_xor_si512(fl2, m2);
-                lm3 = _mm512_xor_si512(fl3, m3);
-                lm4 = _mm512_xor_si512(fl4, m4);
-                lm5 = _mm512_xor_si512(fl5, m5);
+                // loop_mix' (computed above from the old values)
+                lm0 = lm0_next;
+                lm1 = lm1_next;
+                lm2 = lm2_next;
+                lm3 = lm3_next;
+                lm4 = lm4_next;
+                lm5 = lm5_next;
                 (r0, r1, r2, r3, r4, r5)
             }};
         }
@@ -324,6 +331,12 @@ mod simd {
                 let u3 = _mm512_add_epi64(m3, lm3);
                 let u4 = _mm512_add_epi64(m4, lm4);
                 let u5 = _mm512_add_epi64(m5, lm5);
+                let lm0_next = _mm512_xor_si512(fl0, m0); // old values
+                let lm1_next = _mm512_xor_si512(fl1, m1); // old values
+                let lm2_next = _mm512_xor_si512(fl2, m2); // old values
+                let lm3_next = _mm512_xor_si512(fl3, m3); // old values
+                let lm4_next = _mm512_xor_si512(fl4, m4); // old values
+                let lm5_next = _mm512_xor_si512(fl5, m5); // old values
                 fl0 = _mm512_add_epi64(fl0, inc);
                 fl1 = _mm512_add_epi64(fl1, inc);
                 fl2 = _mm512_add_epi64(fl2, inc);
@@ -336,12 +349,12 @@ mod simd {
                 m3 = _mm512_add_epi64(_mm512_rol_epi64(m3, 16), _mm512_rol_epi64(lm3, 40));
                 m4 = _mm512_add_epi64(_mm512_rol_epi64(m4, 16), _mm512_rol_epi64(lm4, 40));
                 m5 = _mm512_add_epi64(_mm512_rol_epi64(m5, 16), _mm512_rol_epi64(lm5, 40));
-                lm0 = _mm512_xor_si512(fl0, m0);
-                lm1 = _mm512_xor_si512(fl1, m1);
-                lm2 = _mm512_xor_si512(fl2, m2);
-                lm3 = _mm512_xor_si512(fl3, m3);
-                lm4 = _mm512_xor_si512(fl4, m4);
-                lm5 = _mm512_xor_si512(fl5, m5);
+                lm0 = lm0_next;
+                lm1 = lm1_next;
+                lm2 = lm2_next;
+                lm3 = lm3_next;
+                lm4 = lm4_next;
+                lm5 = lm5_next;
                 (
                     u64x8_to_f64x8(u0, exp_bits, ones),
                     u64x8_to_f64x8(u1, exp_bits, ones),
@@ -438,6 +451,12 @@ mod simd {
                 let r3 = _mm512_add_epi64(m3, lm3);
                 let r4 = _mm512_add_epi64(m4, lm4);
                 let r5 = _mm512_add_epi64(m5, lm5);
+                let lm0_next = _mm512_xor_si512(fl0, m0); // old values
+                let lm1_next = _mm512_xor_si512(fl1, m1); // old values
+                let lm2_next = _mm512_xor_si512(fl2, m2); // old values
+                let lm3_next = _mm512_xor_si512(fl3, m3); // old values
+                let lm4_next = _mm512_xor_si512(fl4, m4); // old values
+                let lm5_next = _mm512_xor_si512(fl5, m5); // old values
                 fl0 = _mm512_add_epi64(fl0, inc);
                 fl1 = _mm512_add_epi64(fl1, inc);
                 fl2 = _mm512_add_epi64(fl2, inc);
@@ -450,12 +469,12 @@ mod simd {
                 m3 = _mm512_add_epi64(_mm512_rol_epi64(m3, 16), _mm512_rol_epi64(lm3, 40));
                 m4 = _mm512_add_epi64(_mm512_rol_epi64(m4, 16), _mm512_rol_epi64(lm4, 40));
                 m5 = _mm512_add_epi64(_mm512_rol_epi64(m5, 16), _mm512_rol_epi64(lm5, 40));
-                lm0 = _mm512_xor_si512(fl0, m0);
-                lm1 = _mm512_xor_si512(fl1, m1);
-                lm2 = _mm512_xor_si512(fl2, m2);
-                lm3 = _mm512_xor_si512(fl3, m3);
-                lm4 = _mm512_xor_si512(fl4, m4);
-                lm5 = _mm512_xor_si512(fl5, m5);
+                lm0 = lm0_next;
+                lm1 = lm1_next;
+                lm2 = lm2_next;
+                lm3 = lm3_next;
+                lm4 = lm4_next;
+                lm5 = lm5_next;
                 (r0, r1, r2, r3, r4, r5)
             }};
         }
@@ -551,6 +570,12 @@ mod simd {
                 let u3 = _mm512_add_epi64(m3, lm3);
                 let u4 = _mm512_add_epi64(m4, lm4);
                 let u5 = _mm512_add_epi64(m5, lm5);
+                let lm0_next = _mm512_xor_si512(fl0, m0); // old values
+                let lm1_next = _mm512_xor_si512(fl1, m1); // old values
+                let lm2_next = _mm512_xor_si512(fl2, m2); // old values
+                let lm3_next = _mm512_xor_si512(fl3, m3); // old values
+                let lm4_next = _mm512_xor_si512(fl4, m4); // old values
+                let lm5_next = _mm512_xor_si512(fl5, m5); // old values
                 fl0 = _mm512_add_epi64(fl0, inc);
                 fl1 = _mm512_add_epi64(fl1, inc);
                 fl2 = _mm512_add_epi64(fl2, inc);
@@ -563,12 +588,12 @@ mod simd {
                 m3 = _mm512_add_epi64(_mm512_rol_epi64(m3, 16), _mm512_rol_epi64(lm3, 40));
                 m4 = _mm512_add_epi64(_mm512_rol_epi64(m4, 16), _mm512_rol_epi64(lm4, 40));
                 m5 = _mm512_add_epi64(_mm512_rol_epi64(m5, 16), _mm512_rol_epi64(lm5, 40));
-                lm0 = _mm512_xor_si512(fl0, m0);
-                lm1 = _mm512_xor_si512(fl1, m1);
-                lm2 = _mm512_xor_si512(fl2, m2);
-                lm3 = _mm512_xor_si512(fl3, m3);
-                lm4 = _mm512_xor_si512(fl4, m4);
-                lm5 = _mm512_xor_si512(fl5, m5);
+                lm0 = lm0_next;
+                lm1 = lm1_next;
+                lm2 = lm2_next;
+                lm3 = lm3_next;
+                lm4 = lm4_next;
+                lm5 = lm5_next;
                 // f = (u >> 11 | exp_bits) as f64 - 1.0, then fma(f, range, min)
                 macro_rules! to_randf {
                     ($u:expr) => {{
