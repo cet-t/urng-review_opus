@@ -823,60 +823,98 @@ macro_rules! impl_default_from_seed64 {
 }
 pub(crate) use impl_default_from_seed64;
 
+/// `rand_core` integration for generators with a `u32` word and a `u32` seed
+/// (REVIEW B17).
+///
+/// - `from_seed` reads the 4-byte seed little-endian (it used `from_ne_bytes`,
+///   so results depended on the host byte order) and calls `new`.
+/// - `next_u64` puts the first word in the low half, matching
+///   `rand_core::utils::next_u64_via_u32` and the little-endian byte order of
+///   `fill_bytes` (the first word used to be the high half).
 #[cfg(feature = "rand")]
-macro_rules! impl_try_rng_trait {
+macro_rules! impl_rand32 {
     ($($type:ty),* $(,)?) => {
         $(
             impl rand_core::TryRng for $type {
                 type Error = std::convert::Infallible;
 
+                #[inline]
                 fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-                    Ok(self.nextu())
+                    Ok($crate::rng::Rng::nextu(self))
                 }
 
+                #[inline]
                 fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-                    let hi = self.nextu() as u64;
-                    let lo = self.nextu() as u64;
-                    Ok(hi << 32 | lo)
+                    let lo = $crate::rng::Rng::nextu(self) as u64;
+                    let hi = $crate::rng::Rng::nextu(self) as u64;
+                    Ok((hi << 32) | lo)
                 }
 
                 fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-                    let mut i = 0;
-                    while i < dst.len() {
-                        let remaining = dst.len() - i;
-                        if remaining >= 4 {
-                            let val = self.nextu();
-                            dst[i..i + 4].copy_from_slice(&val.to_le_bytes());
-                            i += 4;
-                        } else {
-                            let val = self.nextu();
-                            dst[i..].copy_from_slice(&val.to_le_bytes()[..remaining]);
-                            i += remaining;
-                        }
+                    for chunk in dst.chunks_mut(4) {
+                        let v = $crate::rng::Rng::nextu(self).to_le_bytes();
+                        chunk.copy_from_slice(&v[..chunk.len()]);
                     }
                     Ok(())
                 }
             }
-        )*
-    };
-}
-#[cfg(feature = "rand")]
-pub(crate) use impl_try_rng_trait;
 
-#[cfg(feature = "rand")]
-macro_rules! impl_rand_trait {
-    ($($type:ty),* $(,)?) => {
-        $(
             impl rand_core::SeedableRng for $type {
                 type Seed = [u8; 4];
 
                 fn from_seed(seed: Self::Seed) -> Self {
-                    let seed = u32::from_ne_bytes(seed);
-                    Self::new(seed.into())
+                    Self::new(u32::from_le_bytes(seed))
                 }
             }
         )*
     };
 }
 #[cfg(feature = "rand")]
-pub(crate) use impl_rand_trait;
+pub(crate) use impl_rand32;
+
+/// `rand_core` integration for generators with a `u64` word and a `u64` seed
+/// (REVIEW B17: these had no `TryRng` impl at all, and their `Seed` was 4
+/// bytes, so only 2^32 of their 2^64 seeds were reachable).
+///
+/// - `from_seed` reads the 8-byte seed little-endian and calls `new`.
+/// - `next_u32` returns the high half of a word (the better-mixed bits for
+///   the xorshift-family outputs).
+/// - `fill_bytes` writes words little-endian, consistent with `next_u64`.
+#[cfg(feature = "rand")]
+macro_rules! impl_rand64 {
+    ($($type:ty),* $(,)?) => {
+        $(
+            impl rand_core::TryRng for $type {
+                type Error = std::convert::Infallible;
+
+                #[inline]
+                fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+                    Ok(($crate::rng::Rng::nextu(self) >> 32) as u32)
+                }
+
+                #[inline]
+                fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+                    Ok($crate::rng::Rng::nextu(self))
+                }
+
+                fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+                    for chunk in dst.chunks_mut(8) {
+                        let v = $crate::rng::Rng::nextu(self).to_le_bytes();
+                        chunk.copy_from_slice(&v[..chunk.len()]);
+                    }
+                    Ok(())
+                }
+            }
+
+            impl rand_core::SeedableRng for $type {
+                type Seed = [u8; 8];
+
+                fn from_seed(seed: Self::Seed) -> Self {
+                    Self::new(u64::from_le_bytes(seed))
+                }
+            }
+        )*
+    };
+}
+#[cfg(feature = "rand")]
+pub(crate) use impl_rand64;
