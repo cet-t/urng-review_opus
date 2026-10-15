@@ -1,4 +1,4 @@
-use std::slice::from_raw_parts_mut;
+﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -266,7 +266,9 @@ mod simd {
     #[target_feature(enable = "avx512f,avx512dq")]
     #[allow(unsafe_op_in_unsafe_fn, unused_assignments)]
     unsafe fn cet64x8_next_u64s_chunk(chunk_idx: usize, chunk: &mut [u64], nt: bool, seed: u64) {
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 64 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 64).wrapping_mul(STRIDE));
         let sp1 = _mm512_set1_epi64(CET_SP1 as i64);
         let p1 = _mm512_set1_epi64(CET_P1 as i64);
 

@@ -1,4 +1,4 @@
-use std::slice::from_raw_parts_mut;
+﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -39,7 +39,7 @@ where
         .par_chunks_mut(XOROSHIRO64SS_PAR_CHUNK)
         .enumerate()
         .for_each(|(chunk_idx, chunk)| {
-            let mut local_rng = Xoroshiro64Ss::new(seed.wrapping_add(chunk_idx as u32));
+            let mut local_rng = Xoroshiro64Ss::new(crate::_internal::chunk_seed32(seed, chunk_idx));
             unsafe {
                 fill_chunk_auto(chunk, nt, || {
                     let mut out = [T::default(); 16];

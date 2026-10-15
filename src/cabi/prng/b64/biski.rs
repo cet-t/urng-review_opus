@@ -1,4 +1,4 @@
-use std::slice::from_raw_parts_mut;
+﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -154,7 +154,9 @@ mod simd {
     #[target_feature(enable = "avx512f")]
     #[allow(unsafe_op_in_unsafe_fn, unused_assignments)]
     unsafe fn biski64x8_next_u64s_chunk(chunk_idx: usize, chunk: &mut [u64], nt: bool, seed: u64) {
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
         let inc = _mm512_set1_epi64(crate::prng::b64::biski::INC as i64);
 
         macro_rules! make_state {
@@ -278,7 +280,9 @@ mod simd {
     #[target_feature(enable = "avx512f")]
     #[allow(unsafe_op_in_unsafe_fn, unused_assignments)]
     unsafe fn biski64x8_next_f64s_chunk(chunk_idx: usize, chunk: &mut [f64], _nt: bool, seed: u64) {
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
         let inc = _mm512_set1_epi64(crate::prng::b64::biski::INC as i64);
         let exp_bits = _mm512_set1_epi64(0x3FF0000000000000u64 as i64);
         let ones = _mm512_set1_pd(1.0f64);
@@ -391,7 +395,9 @@ mod simd {
         min: i64,
         max: i64,
     ) {
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
         let inc = _mm512_set1_epi64(crate::prng::b64::biski::INC as i64);
         let range = (max as i128 - min as i128 + 1) as u128;
 
@@ -499,7 +505,9 @@ mod simd {
         min: f64,
         max: f64,
     ) {
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
         let inc = _mm512_set1_epi64(crate::prng::b64::biski::INC as i64);
         let exp_bits = _mm512_set1_epi64(0x3FF0000000000000u64 as i64);
         let one = _mm512_set1_pd(1.0f64);

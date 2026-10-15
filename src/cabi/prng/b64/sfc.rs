@@ -1,4 +1,4 @@
-use std::slice::from_raw_parts_mut;
+﻿use std::slice::from_raw_parts_mut;
 
 use rayon::prelude::*;
 
@@ -148,16 +148,18 @@ mod simd {
 
     /// 6-way interleaved SFC64 with AVX-512 SoA layout.
     ///
-    /// SFC64's critical path is 5 cycles (res→c→b→res), so 6 independent groups
-    /// fully hide the latency. Each group holds 8 streams → 48 u64 per iteration.
+    /// SFC64's critical path is 5 cycles (res竊団竊鍛竊池es), so 6 independent groups
+    /// fully hide the latency. Each group holds 8 streams 竊・48 u64 per iteration.
     ///
-    /// Register budget: 6×4=24 state ZMM + 6 res + 1 `one` = 31 ZMM (fits in 32).
+    /// Register budget: 6ﾃ・=24 state ZMM + 6 res + 1 `one` = 31 ZMM (fits in 32).
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
     #[allow(unsafe_op_in_unsafe_fn, unused_assignments)]
     unsafe fn sfc64x8_next_u64s_chunk(chunk_idx: usize, chunk: &mut [u64], nt: bool, seed: u64) {
         const STRIDE: u64 = 0x9E3779B97F4A7C15u64;
-        let chunk_base = seed.wrapping_add((chunk_idx as u64).wrapping_mul(STRIDE));
+        // Each chunk owns a disjoint block of 48 stream indices (REVIEW B3: the old
+        // `chunk_idx + lane` indexing made adjacent chunks share all but one stream).
+        let chunk_base = seed.wrapping_add(((chunk_idx as u64) * 48).wrapping_mul(STRIDE));
 
         macro_rules! make_state {
             ($group:expr) => {{
