@@ -8,7 +8,7 @@ use crate::prng::b64::SplitMix64;
 /// A Philox 2x64 random number generator.
 ///
 /// This is a counter-based RNG suitable for parallel applications. Implements
-/// [`Rng`] directly: each call to [`Rng::nextu`] hands out one `u64` from
+/// [`Rng`](crate::Rng) directly: each call to [`Rng::nextu`](crate::Rng::nextu) hands out one `u64` from
 /// an internal 2-word buffer, recomputing a fresh block every 2nd call.
 ///
 /// # Examples
@@ -79,7 +79,7 @@ impl Philox64 {
     /// Generates the next block of 2 random `u64` values in one call.
     ///
     /// This is the raw bulk-generation path (used internally to refill the
-    /// scalar [`Rng::nextu`] buffer, and available directly for
+    /// scalar [`Rng::nextu`](crate::Rng::nextu) buffer, and available directly for
     /// throughput-sensitive callers that want the whole block at once).
     #[inline]
     pub fn next_raw(&mut self) -> [wu64; 2] {
@@ -99,7 +99,7 @@ impl_ring_rng64!(Philox64, 2, next_raw);
 /// A Philox 4x64 random number generator.
 ///
 /// This is a counter-based RNG suitable for parallel applications. Implements
-/// [`Rng`] directly: each call to [`Rng::nextu`] hands out one `u64` from
+/// [`Rng`](crate::Rng) directly: each call to [`Rng::nextu`](crate::Rng::nextu) hands out one `u64` from
 /// an internal 4-word buffer, recomputing a fresh block every 4th call.
 ///
 /// # Examples

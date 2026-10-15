@@ -744,34 +744,6 @@ macro_rules! safe_test {
 }
 pub(crate) use safe_test;
 
-macro_rules! unsafe_test {
-    ($($name:ident),+) => {
-        $(pastey::paste! {
-            #[test]
-            fn [<test_ $name:snake>]() {
-                unsafe fn as_bytes<T>(v: &T) -> &[u8] {
-                    unsafe {
-                        std::slice::from_raw_parts(v as *const T as *const u8, std::mem::size_of::<T>())
-                    }
-                }
-
-                unsafe {
-                    let mut rng1 = $name::new(0);
-                    let mut rng2 = $name::new(0);
-
-                    let u1 = rng1.nextuv();
-                    let u2 = rng2.nextuv();
-                    assert_eq!(as_bytes(&u1), as_bytes(&u2));
-
-                    let f1 = rng1.nextfv();
-                    let f2 = rng2.nextfv();
-                    assert_eq!(as_bytes(&f1), as_bytes(&f2));
-                }
-            }
-        })+
-    };
-}
-pub(crate) use unsafe_test;
 
 /// Implements `Default` and [`crate::Seed`] for one or more `seed: u32`-constructed
 /// RNGs. `Default` seeds via [`crate::_internal::default_seed32`] (a time-based,

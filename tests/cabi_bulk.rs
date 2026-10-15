@@ -400,7 +400,7 @@ fn c_abi_float_ranges_exclude_max() {
         check!(64, cet64, cet64_rand_f64s, cet64_free, 1u64);
         check!(64, cet256, cet256_rand_f64s, cet256_free, 1u64);
         check!(64, mt1993764, mt1993764_rand_f64s, mt1993764_free, 1u64);
-        check!(64, sfmt1993764, sfmt_rand_f64s, sfmt1993764_free, 1u64);
+        check!(64, sfmt1993764, sfmt1993764_rand_f64s, sfmt1993764_free, 1u64);
         check!(64, sfc64, sfc64_rand_f64s, sfc64_free, 1u64);
         check!(64, splitmix64, splitmix64_rand_f64s, splitmix64_free, 1u64);
         check!(64, twisted_gfsr, twisted_gfsr_rand_f64s, twisted_gfsr_free, 1u64);

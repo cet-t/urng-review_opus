@@ -30,9 +30,8 @@ AVX generators expose a bulk-generation API and are listed separately; they requ
 | `Sfmt132049`    | SFMT             | $2^{132049}-1$   |
 | `Sfmt216091`    | SFMT             | $2^{216091}-1$   |
 | `Sfc32`         | SFC32            | $2^{127}-1$      |
-| `Sfc32x4`       | SFC32 x4         | $2^{127}-1$      |
 | `Pcg32`         | PCG-XSH-RR       | $2^{64}$         |
-| `Philox32x4`    | Philox 4x32      | -                |
+| `Philox32`      | Philox 4x32-10   | -                |
 | `SplitMix32`    | SplitMix32       | $2^{32}$         |
 | `Xorwow`        | XORWOW           | $2^{192}-2^{32}$ |
 | `Xorshift32`    | Xorshift         | $2^{32}-1$       |
@@ -40,8 +39,8 @@ AVX generators expose a bulk-generation API and are listed separately; they requ
 | `Xoshiro128Pp`  | xoshiro128++     | $2^{128}-1$      |
 | `Xoshiro128Ss`  | xoshiro128\*\*   | $2^{128}-1$      |
 | `Xoroshiro64Ss` | xoroshiro64\*\*  | $2^{64}-1$       |
-| `Threefry32x4`  | Threefry 4x32    | -                |
-| `Threefry32x2`  | Threefry 2x32    | -                |
+| `Threefry32x4`  | Threefry 4x32-20 | -                |
+| `Threefry32x2`  | Threefry 2x32-20 | -                |
 | `Squares32`     | Squares          | -                |
 | `Jsf32`         | JSF32            | -                |
 
@@ -55,7 +54,8 @@ AVX generators expose a bulk-generation API and are listed separately; they requ
 | `Sfc64`          | SFC64               | $2^{256}$ approx |
 | `Mt1993764`      | Mersenne Twister 64 | $2^{19937}-1$    |
 | `Sfmt1993764`    | SFMT 64             | $2^{19937}-1$    |
-| `Philox64`       | Philox 2x64         | -                |
+| `Philox64`       | Philox 2x64-10      | -                |
+| `Philox4x64`     | Philox 4x64-10      | -                |
 | `Xorshift64`     | Xorshift64          | $2^{64}-1$       |
 | `Xoroshiro128Pp` | xoroshiro128++      | $2^{128}-1$      |
 | `Xoroshiro128Ss` | xoroshiro128\*\*    | $2^{128}-1$      |
@@ -95,9 +95,22 @@ let values: [u32; 16] = rng.nextu();
 let floats: [f32; 16] = rng.nextf();
 ```
 
-### SIMD Generators (AVX)
+### SIMD Generators (x86_64)
 
-These generators expose a bulk-generation API and require AVX support at runtime.
+> Requires the `simd` feature; available on `x86_64` only (the feature compiles to nothing elsewhere).
+
+These generators expose a bulk-generation API. Every lane is an ordinary
+scalar stream (tested lane by lane against the scalar generators). Types that
+need instructions beyond the x86_64 baseline have `unsafe` / `#[target_feature]`
+constructors: check the CPU first (`is_x86_feature_detected!`). The C ABI
+`*_new` functions do this and return NULL when the features are missing.
+
+#### SSE2 (always available on x86_64; safe API)
+
+| Struct           | Algorithm         | Output  |
+| ---------------- | ----------------- | ------- |
+| `Sfc32x4`        | SFC32 x4          | 4×`u32` |
+| `Xoshiro256Ssx2` | xoshiro256\*\* x2 | 2×`u64` |
 
 #### AVX2 (`avx2`)
 
@@ -106,25 +119,25 @@ These generators expose a bulk-generation API and require AVX support at runtime
 | `Sfc32x8`         | SFC32 x8           | 8×`u32` |
 | `Jsf32x8`         | JSF32 x8           | 8×`u32` |
 | `Xoroshiro64Ssx8` | xoroshiro64\*\* x8 | 8×`u32` |
+| `Xorshift32x8`    | Xorshift32 x8      | 8×`u32` |
 
-#### AVX-512 (`avx512f`)
+#### AVX-512 (`avx512f`, plus `avx512dq` where noted)
 
-| Struct             | Algorithm           | Output   |
-| ------------------ | ------------------- | -------- |
-| `Pcg32x8`          | PCG-XSH-RR x8       | 8×`u32`  |
-| `Philox32x4x4`     | Philox 4x32 x4      | 16×`u32` |
-| `SplitMix32x16`    | SplitMix32 x16      | 16×`u32` |
-| `Squares32x8`      | Squares x8          | 8×`u32`  |
-| `Xoshiro128Ppx16`  | xoshiro128++ x16    | 16×`u32` |
-| `Xoshiro128Ssx16`  | xoshiro128\*\* x16  | 16×`u32` |
-| `Jsf32x16`         | JSF32 x16           | 16×`u32` |
-| `Sfc32x16`         | SFC32 x16           | 16×`u32` |
-| `Xoroshiro64Ssx16` | xoroshiro64\*\* x16 | 16×`u32` |
-| `Xoshiro256Ssx2`   | xoshiro256\*\* x2   | 2×`u64`  |
-| `Sfc64x8`          | SFC64 x8            | 8×`u64`  |
-| `Cet64x8`          | CET64 x8            | 8×`u64`  |
-| `Cet256x2`         | CET256 x2           | 2×`u64`  |
-| `Biski64x8`        | Biski64 x8          | 8×`u64`  |
+| Struct             | Algorithm            | Output   |
+| ------------------ | -------------------- | -------- |
+| `Pcg32x8`          | PCG-XSH-RR x8        | 8×`u32`  |
+| `Philox32x4x4`     | Philox 4x32-10 x4    | 16×`u32` |
+| `SplitMix32x16`    | SplitMix32 x16       | 16×`u32` |
+| `Squares32x8`      | Squares x8 (+DQ)     | 8×`u32`  |
+| `Xoshiro128Ppx16`  | xoshiro128++ x16     | 16×`u32` |
+| `Xoshiro128Ssx16`  | xoshiro128\*\* x16   | 16×`u32` |
+| `Jsf32x16`         | JSF32 x16            | 16×`u32` |
+| `Sfc32x16`         | SFC32 x16            | 16×`u32` |
+| `Xoroshiro64Ssx16` | xoroshiro64\*\* x16  | 16×`u32` |
+| `Sfc64x8`          | SFC64 x8             | 8×`u64`  |
+| `Cet64x8`          | CET64 x8 (+DQ)       | 8×`u64`  |
+| `Cet256x2`         | CET256 x2 (+DQ)      | 2×`u64`  |
+| `Biski64x8`        | Biski64 x8           | 8×`u64`  |
 
 ## Sampler
 
@@ -236,11 +249,27 @@ This crate exports a C-compatible ABI generic interface. Each generator has corr
 Example for `Mt19937`:
 
 ```c
-void* mt19937_new(uint32_t seed, size_t warm);
+void* mt19937_new(uint32_t seed);
 void mt19937_next_u32s(void* ptr, uint32_t* out, size_t count);
+void mt19937_next_f32s(void* ptr, float* out, size_t count);
+void mt19937_rand_i32s(void* ptr, int32_t* out, size_t count, int32_t min, int32_t max);
 void mt19937_rand_f32s(void* ptr, float* out, size_t count, float min, float max);
 void mt19937_free(void* ptr);
 ```
+
+Conventions (see the `cabi` module documentation for details):
+
+- A NULL handle, a NULL buffer or `count == 0` writes nothing; any element
+  alignment of `out` is accepted.
+- `*_rand_i*s` writes nothing when `min > max`; `*_rand_f*s` returns values in
+  `[min, max)`.
+- SIMD `*_new` functions return NULL when the CPU lacks the required features.
+- Counter-based generators and generators with a jump-ahead (`philox*`,
+  `threefry*`, `threefish256`, `squares32`, `splitmix*`, `pcg32*`) and the
+  sequential ones (`xorshift*`, `twisted_gfsr`) return exactly the Rust
+  `nextu` stream. The others fill large buffers in parallel from
+  independently seeded substreams (deterministic per seed, but not the
+  `nextu` stream).
 
 [SeedableRng]: https://docs.rs/rand_core/latest/rand_core/trait.SeedableRng.html
 [TryRng]: https://docs.rs/rand_core/latest/rand_core/trait.TryRng.html

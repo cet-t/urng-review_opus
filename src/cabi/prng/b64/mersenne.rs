@@ -132,7 +132,7 @@ pub unsafe extern "C" fn sfmt1993764_rand_i64s(
 }
 /// Fills `out[0..count]` with `f64` values uniformly distributed in `[min, max)`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sfmt_rand_f64s(
+pub unsafe extern "C" fn sfmt1993764_rand_f64s(
     ptr: *mut Sfmt1993764,
     out: *mut f64,
     count: usize,
@@ -146,4 +146,18 @@ pub unsafe extern "C" fn sfmt_rand_f64s(
             r.randf(min, max)
         });
     }
+}
+
+/// Deprecated name of [`sfmt1993764_rand_f64s`] (REVIEW B20: the only C ABI
+/// function without its generator's prefix). Kept for compatibility.
+#[deprecated(note = "use sfmt1993764_rand_f64s")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sfmt_rand_f64s(
+    ptr: *mut Sfmt1993764,
+    out: *mut f64,
+    count: usize,
+    min: f64,
+    max: f64,
+) {
+    unsafe { sfmt1993764_rand_f64s(ptr, out, count, min, max) }
 }
