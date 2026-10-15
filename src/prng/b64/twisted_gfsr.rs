@@ -71,13 +71,18 @@ impl TwistedGFSR {
         if self.index >= N_GFSR {
             self.twist();
         }
-        let mut y = self.seed[*self.index];
-        y ^= (y << 7) & 0x2b5b_2500;
-        y ^= (y << 15) & 0xdb8b_0000;
-        y ^= y >> 16;
+        let y = temper_tt800(self.seed[*self.index]);
         self.index += 1;
         y
     }
+}
+
+/// TT800 tempering (1996 version).
+#[inline(always)]
+fn temper_tt800(mut y: u32) -> u32 {
+    y ^= (y << 7) & 0x2b5b_2500;
+    y ^= (y << 15) & 0xdb8b_0000;
+    y ^ (y >> 16)
 }
 
 impl Rng for TwistedGFSR {
@@ -90,6 +95,14 @@ impl Rng for TwistedGFSR {
     /// index 0 and `shuffle` gave the same permutation for every seed.
     #[inline]
     fn nextu(&mut self) -> Self::Word {
+        let i = *self.index;
+        if i + 2 <= N_GFSR {
+            // both words come from the current block: one bounds/twist check
+            self.index = wrap!(i + 2);
+            let hi = temper_tt800(self.seed[i]) as u64;
+            let lo = temper_tt800(self.seed[i + 1]) as u64;
+            return (hi << 32) | lo;
+        }
         let hi = self.next_u32_raw() as u64;
         let lo = self.next_u32_raw() as u64;
         (hi << 32) | lo
@@ -100,6 +113,19 @@ impl Rng for TwistedGFSR {
 mod tests {
     use super::*;
     use crate::{Choice, Shuffle};
+
+    /// The pair fast path equals two consecutive raw outputs, including pairs
+    /// that straddle a twist (N = 25 is odd).
+    #[test]
+    fn nextu_is_two_raw_outputs() {
+        let mut a = TwistedGFSR::new(11);
+        let mut b = a;
+        for _ in 0..1000 {
+            let hi = b.next_u32_raw() as u64;
+            let lo = b.next_u32_raw() as u64;
+            assert_eq!(a.nextu(), (hi << 32) | lo);
+        }
+    }
 
     crate::safe_test! { TwistedGFSR }
 

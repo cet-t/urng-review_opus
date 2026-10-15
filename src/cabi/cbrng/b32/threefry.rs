@@ -28,6 +28,28 @@ impl CtrRing for Threefry32x4 {
             *o = *w;
         }
     }
+    /// Batched blocks: while the low 64 counter bits do not wrap inside the
+    /// batch, the upper words are constant and the fixed-trip loop vectorizes
+    /// across blocks; a batch that crosses 2^64 takes the per-block path.
+    #[inline]
+    fn blocks(&self, c: u128, out: &mut [u32]) {
+        let n = (out.len() / 4) as u64;
+        let lo = c as u64;
+        if lo.checked_add(n).is_none() {
+            for (i, blk) in out.chunks_exact_mut(4).enumerate() {
+                self.block(c.wrapping_add(i as u128), blk);
+            }
+            return;
+        }
+        let (h0, h1) = ((c >> 64) as u32, (c >> 96) as u32);
+        for (i, blk) in out.chunks_exact_mut(4).enumerate() {
+            let cc = lo + i as u64;
+            let r = Threefry32x4::compute(wrap![cc as u32, (cc >> 32) as u32, h0, h1], &self.k);
+            for (o, w) in blk.iter_mut().zip(r) {
+                *o = *w;
+            }
+        }
+    }
 }
 
 /// The 2x32 counter is 64 bits wide and wraps modulo 2^64, like `next_raw`.
@@ -46,6 +68,24 @@ impl CtrRing for Threefry32x2 {
         let ctr = wrap![c as u32, (c >> 32) as u32];
         for (o, w) in out.iter_mut().zip(Threefry32x2::compute(ctr, &self.k)) {
             *o = *w;
+        }
+    }
+    /// Batched blocks (see the 4x32 version); the 64-bit counter wraps.
+    #[inline]
+    fn blocks(&self, c: u128, out: &mut [u32]) {
+        let n = (out.len() / 2) as u64;
+        let lo = c as u64;
+        if lo.checked_add(n).is_none() {
+            for (i, blk) in out.chunks_exact_mut(2).enumerate() {
+                self.block(c.wrapping_add(i as u128), blk);
+            }
+            return;
+        }
+        for (i, blk) in out.chunks_exact_mut(2).enumerate() {
+            let cc = lo + i as u64;
+            let r = Threefry32x2::compute(wrap![cc as u32, (cc >> 32) as u32], &self.k);
+            blk[0] = *r[0];
+            blk[1] = *r[1];
         }
     }
 }
@@ -165,5 +205,33 @@ pub unsafe extern "C" fn threefry32x2_rand_f32s(ptr: *mut Threefry32x2, out: *mu
         let Some(rng) = ptr.as_mut() else { return };
         let Some(buf) = crate::_internal::out_slice(out, count) else { return };
         par_fill_ctr(rng, buf, |x| x.to_randf(min, max));
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rng::Rng;
+
+    /// The batched fast path must fall back when the low 64 counter bits wrap
+    /// inside a batch, and still equal the sequential stream.
+    #[test]
+    fn batched_blocks_handle_the_64_bit_carry() {
+        for start in [u64::MAX as u128 - 3, u64::MAX as u128 - 15, (7u128 << 64) | (u64::MAX as u128 - 1)] {
+            let mut a = Threefry32x4::new(9);
+            a.set_ctr(start);
+            let mut b = a;
+            let mut buf = vec![0u32; 256];
+            par_fill_ctr(&mut a, &mut buf, |x| x);
+            for (i, &x) in buf.iter().enumerate() {
+                assert_eq!(x, b.nextu(), "start {start:#x}, element {i}");
+            }
+            assert_eq!(a.ctr(), start + 64);
+        }
+        let mut a = Threefry32x2::new(9);
+        a.set_ctr(u64::MAX as u128 - 5);
+        let mut b = a;
+        let mut buf = vec![0u32; 256];
+        par_fill_ctr(&mut a, &mut buf, |x| x);
+        assert!(buf.iter().all(|&x| x == b.nextu()), "2x32 across the 64-bit wrap");
     }
 }

@@ -464,6 +464,15 @@ pub(crate) trait CtrRing: crate::rng::Rng + Sync {
     fn set_ctr(&mut self, ctr: u128);
     /// Writes `block(ctr)` into `out[..N]`.
     fn block(&self, ctr: u128, out: &mut [Self::Word]);
+
+    /// Writes the `out.len() / N` consecutive blocks starting at `ctr`.
+    /// Implementors may override this with a batched (vectorizable) version.
+    #[inline]
+    fn blocks(&self, ctr: u128, out: &mut [Self::Word]) {
+        for (i, blk) in out.chunks_exact_mut(Self::N).enumerate() {
+            self.block(ctr.wrapping_add(i as u128), blk);
+        }
+    }
 }
 
 /// Bulk fill for [`CtrRing`] generators (REVIEW B14). The output is exactly
@@ -505,10 +514,8 @@ where
                 unsafe {
                     fill_chunk_auto(chunk, nt, || {
                         let mut out = [T::default(); BATCH];
-                        for blk in words.chunks_exact_mut(R::N) {
-                            r.block(ctr, blk);
-                            ctr = ctr.wrapping_add(1);
-                        }
+                        r.blocks(ctr, &mut words);
+                        ctr = ctr.wrapping_add((BATCH / R::N) as u128);
                         for (o, w) in out.iter_mut().zip(words) {
                             *o = map(w);
                         }
