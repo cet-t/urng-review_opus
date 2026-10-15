@@ -20,10 +20,10 @@
 | 8 | B10 アルゴリズム欠陥 | 完了 | bc8ec6a |
 | 9 | B12 Biski64x8 | 完了 | 8abacf2 |
 | 10 | B9 ChaCha/Salsa | 完了 | c8cfb16 |
-| 11 | B8 AVX2型のAVX-512VL使用 | **未着手**（設計のみ。下記） | |
-| 12 | B7 健全性 | **未着手**（設計のみ。下記） | |
-| 13 | B12 残り（Philox32/Philox32x4x4/Xoroshiro64Ssx8・x16/Threefry32x4/MTシード） | 未着手 | |
-| 14 | B13 範囲生成（randi/randf、`__m128i::to_randi`、SIMDの全範囲） | 未着手 | |
+| 11 | B8 AVX2型のAVX-512VL使用 | 完了 | adb9ae0 |
+| 12 | B7 健全性 | 完了 | adb9ae0 |
+| 13 | B12 残り | Xoroshiro64Ssx8/x16 の ** スクランブラは完了（adb9ae0）。Philox32/Philox32x4x4/Threefry32x4/MTシードは未着手 | |
+| 14 | B13 範囲生成 | 完了 | adb9ae0 |
 | 15 | B15 サンプラ | 未着手 | |
 | 16 | B16 非x86 | 未着手 | |
 | 17 | B17 rand連携 | 未着手 | |
@@ -45,13 +45,17 @@
 | B10 | Sfc64 漸化式、Xoroshiro128++ 本物化と long_jump 修正、PCG 増分を奇数化、SIMD SplitMix32 の fmix32 と重ならないレーン配置 | PractRand ベクタ（SFC32/SFC64）、pcg32-demo ベクタ、GF(2) 行列による最大周期と jump/long_jump の厳密検証、全レーン比較、C ABI カーネルの要素単位比較 |
 | B12（Biski） | `loop_mix` を旧値から計算（Rust・C ABI） | 全レーン=スカラー |
 | B9 | ChaCha を RFC 8439 準拠、Salsa20 を仕様準拠（回転13、feed-forward、正しいラウンド数）。`from_key` 追加、Debug で鍵を表示しない | RFC 8439 §2.3.2、eSTREAM Salsa20 Set1 #0、仕様の quarterround、参照比較、自己フィードバックしないこと |
+| B7 | `RngV` を `unsafe trait`、`WordV` を `unsafe fn` に。各 SIMD 型に `#[target_feature]` の `step()`、機能を要する `new` も `#[target_feature]`。ハンドルを受ける C ABI 関数を `unsafe extern "C"` に、NULL ハンドル・NULL バッファ・`count==0` を許容（`from_raw_parts_mut(NULL,0)` の UB を解消）。SIMD の `_new` は `is_x86_feature_detected!` で非対応なら NULL。NT ストアを行う全関数の末尾に `_mm_sfence`。simd モジュールを `target_arch = "x86_64"` に限定。一度も実行されていなかった `unsafe_test!`（コンパイル時 cfg 依存、型検査すら通らない状態）を実行時検出のレーン比較に置換（Sfc32、Cet64x8/Cet256x2、Squares32x8） | `tests/source_invariants.rs`（NT フェンス、VL 命令不使用、C ABI の unsafe 化。基準版で 3 件とも失敗、違反 254 件）、`cabi_bulk::null_and_empty_buffers_are_accepted`（基準版は UB 事前条件違反で異常終了）、各レーン=スカラー比較、Cet64 ミキサの独立式比較 |
+| B8 | `Jsf32x8`/`Sfc32x8`/`Xoroshiro64Ssx8`/`Xorshift32x8` を AVX2 のみで実装（`_mm256_rol_epi32`・`mask_blend`・`loadu_epi32` を排除） | `no_avx512vl_256bit_intrinsics`、各レーン=スカラー、JSF/xoroshiro64** の参照実装比較 |
+| B12（xoroshiro64） | `Xoroshiro64Ssx8/x16` に ** スクランブラ `rotl(s0*0x9E3779BB,5)*5` | 参照実装比較、全レーン=スカラー |
+| B13 | `Word::to_randi` は `min>max` で panic、全範囲でオーバーフローしない（`wrapping_add`）。`to_randf` は `max` を返さない。`to_index` は u128 で計算。`__m128i::to_randi` のレーン1・3の誤りを修正。SIMD の `rand_i32s` は `scale32`（0 = 2^32）で全範囲が定数にならない。64bit SIMD の `randi`/`randf` は `Word` 経由 | `rng::tests`（全範囲、逆転範囲、`max` 未満の網羅確認、巨大 len）、`to_randi_matches_scalar_for_all_widths`、`cabi_bulk::simd_full_range_rand_i32s_is_not_constant`（基準版で失敗）。基準版で `randi(i32::MIN,i32::MAX)` のデバッグ時オーバーフローと `randf(100,101)==101` を実行して確認 |
 
-最終確認時点（c8cfb16）: `cargo test --features full` で 単体 129、結合 3+1+5、doctest 108（README の ignore 2 件）すべて通過。
+最終確認時点（adb9ae0）: `cargo test --features full` で 単体 142、結合 5+1+5+3（cabi_bulk/packaging/seeding/source_invariants）、doctest 109（README の ignore 2 件）すべて通過。`--no-default-features` と rand/cabi/wide/simd/sampler/seedgen/cabi+simd/simd+wide/full の各構成でテストのビルドがエラーなし（simd 単独の警告 13 件は基準版と同じ未使用定数）。
 
 ## 互換性への影響（ここまで）
 
 - 出力が変わる（value-breaking）: 偶数シードの全生成器（B4）、TwistedGFSR、shuffle、Sfc64/Sfc64x8、Xoroshiro128Pp とそのジャンプ、Xoroshiro128Ss::long_jump、Pcg32 系、SplitMix32x16（AVX-512）と wide::SplitMix32xN（とそれで種まきされる wide::Jsf32xN）、Biski64x8、ChaCha/Salsa、各 C ABI 一括生成。メジャーバージョンでの公開を推奨。
-- API: `ChaCha<R>`/`Salsa<R>` は `Copy` でなくなった。`Xoshiro256Ssx2` の内部表現変更（公開 API は不変）。
+- API: `ChaCha<R>`/`Salsa<R>` は `Copy` でなくなった。B7 により、ハンドルを受ける C ABI 関数は Rust からは `unsafe` 呼び出しが必要（C からの ABI・シグネチャは不変）。SIMD の `_new` は非対応 CPU で NULL を返す（従来は SIGILL）。`RngV` は `unsafe trait`、`WordV` のメソッドは `unsafe fn`、`Sfc64x8`/`Biski64x8`/`Cet64x8`/`Cet256x2`/`Xorshift32x8` の `new` は `#[target_feature]`（安全でない文脈からは `unsafe`）。`randi` は `min > max` で panic（従来は無意味な値）。`Xoshiro256Ssx2` の内部表現変更（公開 API は不変）。
 - 固定値テストの更新: `choice::tests::it_works` の期待値 3→7（B4 による意図した変化。テスト自体は維持）。
 
 ## 性能
@@ -59,13 +63,6 @@
 - 修正前ベンチマークは基準 worktree で取得済み（スクラッチ領域 `base_vector.txt` / `base_scalar.txt`）。**修正後の計測は未実施**。
 - 予想される低下: `xoshiro256ssx2_next_u64s` は並列 AVX-512 から逐次 SSE2 に変更（正しさ優先。重複のない並列化には xoshiro256 の jump 実装が必要）。ChaCha20 は 40→20 ラウンドで高速化、Salsa は同等の見込み（未計測）。
 
-## 未完了の設計メモ（B7/B8 の次の手順）
-
-1. `RngV` を `unsafe trait` にし、`WordV` のメソッドを `unsafe fn` にする（`__m256i` は bytemuck で safe に作れるため）。`to_randi` は AVX2 版を `_mm256_blend_epi32` で、`__m128i` 版はレーン1・3のバグを直し、scale=0 を 2^32 とみなす。C ABI の `v_range` は `set1_epi32(scale32(min,max))` に統一する。
-2. `Jsf32x8`/`Sfc32x8`/`Xoroshiro64Ssx8` の `_mm256_rol_epi32` を AVX2 のシフト＋OR に置き換える（B8）。`Xoroshiro64Ssx8/16` に ** スクランブラを追加する（B12）。
-3. `Xorshift32x8::new`、`Sfc64x8`/`Biski64x8`/`Cet64x8`/`Cet256x2::new` を `#[target_feature]` 付きにする。C ABI は `unsafe extern "C"` 化、NULL/`count==0` ガード、SIMD の `_new` は機能非対応なら NULL を返す、NT ストア後に `_mm_sfence()`。
-4. examples/cabi/test.rs は C ABI の unsafe 化に合わせて更新が必要。
-
 ## 残存リスク
 
-上表の未着手項目（特に B7 健全性、B8 の AVX2 機での SIGILL、B13 の範囲生成、B14 の C ABI 再シード重複）はすべて未修正のまま残っています。
+上表の未着手項目（B12 の Philox32/Philox32x4x4/Threefry32x4、B14 の C ABI 再シード重複、B15〜B17、B20/B21）は未修正のまま残っています。AVX2 のみ・AVX-512 非搭載の実機では未検証（本機は AVX-512 搭載。AVX2 型は静的検査とコード上の命令で確認）。
